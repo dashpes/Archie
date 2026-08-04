@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from investment_monitor.config import Settings
@@ -50,6 +51,20 @@ def _run(settings, cfg, now):
         new_callable=AsyncMock,
     ), patch("investment_monitor.robo.sentinel._notify") as notify:
         return run_sentinel(settings, cfg, now=now), notify
+
+
+def _run_holding(settings, cfg, now, symbols):
+    """Run a pass with the broker reporting exactly `symbols` as held.
+
+    Patches the class, not just the method, so no client is constructed and no
+    HTTP is attempted with the ambient credentials.
+    """
+    account = SimpleNamespace(
+        positions=[SimpleNamespace(symbol=s, quantity=1.0) for s in symbols]
+    )
+    with patch("investment_monitor.robo.broker.PublicBroker") as broker_cls:
+        broker_cls.return_value.get_account_state.return_value = account
+        return _run(settings, cfg, now)
 
 
 def test_noop_when_market_closed(tmp_path):
@@ -107,6 +122,54 @@ def test_benched_thesis_not_checked(tmp_path):
     assert out["checked"] == 0 and out["tripped"] == [] and not notify.called
     with get_session() as s:
         assert get_thesis(s, "BENCH").status == ThesisStatus.WATCH.value
+
+
+def test_unheld_active_thesis_not_checked(tmp_path):
+    # An ACTIVE thesis only means the book INTENDS to own the name — the buy may have
+    # been gate-rejected or never reached. Live, 19 of 24 actives had no position (13
+    # never bought at all), so the pass emailed exit/8-K alerts for zero exposure.
+    init_db(tmp_path / "t.db")
+    with get_session() as s:
+        _seed_thesis(s, "HELD", entry_price=10.0, drop_pct=25)
+        _seed_price(s, "HELD", close=7.0)    # -30%: trips, and we DO own it
+        _seed_thesis(s, "GHOST", entry_price=10.0, drop_pct=25)
+        _seed_price(s, "GHOST", close=7.0)   # -30% too, but was never actually bought
+    out, notify = _run_holding(Settings(), _cfg(), OPEN_NOW, ["HELD"])
+    assert out["checked"] == 1
+    assert len(out["tripped"]) == 1 and out["tripped"][0].startswith("HELD:")
+    assert notify.called
+    with get_session() as s:
+        # The ghost is left entirely alone — no exposure, so nothing to act on.
+        assert get_thesis(s, "GHOST").status == ThesisStatus.ACTIVE.value
+        assert get_thesis(s, "GHOST").conviction == 0.6
+
+
+def test_zero_quantity_position_is_not_held(tmp_path):
+    # A closed-out position can linger in the broker payload at quantity 0.
+    init_db(tmp_path / "t.db")
+    with get_session() as s:
+        _seed_thesis(s, "CLOSED", entry_price=10.0, drop_pct=25)
+        _seed_price(s, "CLOSED", close=7.0)
+    account = SimpleNamespace(positions=[SimpleNamespace(symbol="CLOSED", quantity=0.0)])
+    with patch("investment_monitor.robo.broker.PublicBroker") as broker_cls:
+        broker_cls.return_value.get_account_state.return_value = account
+        out, notify = _run(Settings(), _cfg(), OPEN_NOW)
+    assert out["checked"] == 0 and out["tripped"] == [] and not notify.called
+
+
+def test_broker_failure_falls_back_to_every_active_thesis(tmp_path):
+    # Fail OPEN: an unreachable broker must never leave a held name unwatched, so the
+    # pass degrades to the old status-only scan rather than checking nothing.
+    init_db(tmp_path / "t.db")
+    with get_session() as s:
+        _seed_thesis(s, "DROP", entry_price=10.0, drop_pct=25)
+        _seed_price(s, "DROP", close=7.0)
+    with patch("investment_monitor.robo.broker.PublicBroker") as broker_cls:
+        broker_cls.return_value.get_account_state.side_effect = RuntimeError("broker down")
+        out, notify = _run(Settings(), _cfg(), OPEN_NOW)
+    assert out["checked"] == 1
+    assert len(out["tripped"]) == 1 and out["tripped"][0].startswith("DROP:")
+    assert notify.called
 
 
 def test_sentinel_maintains_high_water_mark(tmp_path):
