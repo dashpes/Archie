@@ -603,16 +603,28 @@ def test_evaluator_invalidation_short_circuits_llm(tmp_path):
 # --------------------------------------------------------------------------- #
 def test_parse_thesis_sanitizes_exit_conditions():
     # LLM-proposed exit thresholds are clamped into sane bands: a hallucinated 2%
-    # target can't scalp-exit a position, 5000 days can't disable the horizon.
+    # target can't scalp-exit a position.
     u = parse_thesis_response(
         '{"narrative":"x","conviction":0.7,"exit_conditions":'
-        '{"profit_target_pct":2,"max_hold_days":5000,"trailing_stop_pct":-20}}'
+        '{"profit_target_pct":2,"trailing_stop_pct":-20}}'
     )
     assert u.exit_conditions["profit_target_pct"] == 10.0   # clamped up to the floor
-    assert u.exit_conditions["max_hold_days"] == 365.0      # clamped down to the cap
     assert u.exit_conditions["trailing_stop_pct"] == 20.0   # negative -> magnitude
     # Absent block -> empty dict (config defaults apply unchanged).
     assert parse_thesis_response('{"narrative":"x","conviction":0.7}').exit_conditions == {}
+
+
+def test_parse_thesis_drops_llm_hold_horizon():
+    # The horizon is portfolio policy, not a per-name model judgement: whatever the
+    # LLM proposes is discarded so config.exits.max_hold_days (0 = off) and the 90d
+    # that confluence promotion stamps explicitly stay authoritative. Left enabled it
+    # stamped 30d on 44 theses and time-boxed winners out on merit-free timers.
+    u = parse_thesis_response(
+        '{"narrative":"x","conviction":0.7,"exit_conditions":'
+        '{"profit_target_pct":25,"max_hold_days":30}}'
+    )
+    assert "max_hold_days" not in u.exit_conditions
+    assert u.exit_conditions["profit_target_pct"] == 25.0  # siblings still honoured
 
 
 def test_evaluator_take_profit_short_circuits_llm(tmp_path):
