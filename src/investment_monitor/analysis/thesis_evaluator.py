@@ -145,12 +145,20 @@ def _sanitize_invalidation(conditions: dict) -> dict:
 # LLM-proposed exit thresholds are clamped into these bands, so a hallucinated
 # "profit_target_pct: 2" can't scalp-exit a live position and "5000" can't
 # effectively disable the target. Keys absent/garbage -> fall back to config defaults.
+#
+# max_hold_days is deliberately ABSENT, which makes _sanitize_exit drop any the LLM
+# supplies. The horizon is a portfolio-policy decision, not a per-name judgement the
+# model is equipped to make: left enabled it stamped 30 days on 44 theses (including
+# 10 confluence bets that should have kept promotion's 90d), which silently overrode
+# the config default of 0 = off and produced exactly the churn that default exists to
+# prevent — 7 names time-boxed out over 3 days on merit-free timers, e.g. BAC at
+# +2.5% and NDAQ at +1.9%. Horizons now come only from config.exits.max_hold_days and
+# the 90d that confluence promotion stamps explicitly.
 _EXIT_CLAMPS = {
     "profit_target_pct": (10.0, 200.0),
     "trailing_giveback_pct": (10.0, 90.0),
     "trailing_stop_pct": (5.0, 50.0),
     "trailing_arm_pct": (0.0, 100.0),
-    "max_hold_days": (10.0, 365.0),
 }
 
 

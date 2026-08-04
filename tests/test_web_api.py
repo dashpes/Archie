@@ -55,7 +55,11 @@ def client(tmp_path, monkeypatch):
             kind="thesis_outcome", symbol="EML", as_of_date=date(2026, 6, 25),
             conviction=0.78, realized_return=0.04, direction_correct=1, brier=0.05,
         ))
-        s.add(Price(ticker="EML", date=date(2026, 6, 30), open=12.0, high=12.6,
+        # Anchored to the real clock, not a literal. /api/theses/{sym}/monitor sizes its
+        # lookback off the ENTRY ORDER's age, and that order defaults created_at to now —
+        # so the window clamps to its 30-day floor and a fixed date silently fell outside
+        # it once wall-clock time moved on, taking latest_close to None.
+        s.add(Price(ticker="EML", date=date.today(), open=12.0, high=12.6,
                     low=11.9, close=12.5, volume=100000))
         s.add(InsiderTransaction(
             ticker="EML", filing_date=datetime(2026, 6, 20), trade_date=date(2026, 6, 18),

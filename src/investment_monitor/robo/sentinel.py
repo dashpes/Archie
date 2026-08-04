@@ -4,7 +4,8 @@ The scheduled trade runs happen twice a day, so a position that gaps down on bad
 news mid-morning would otherwise sit unexamined for hours. The sentinel closes
 that blind spot with a deliberately tiny mandate:
 
-- it re-checks ONLY names with a live thesis (never the discovery universe);
+- it re-checks ONLY names that are BOTH actually held at the broker and carry a
+  live ACTIVE thesis (never the discovery universe, never a merely-intended buy);
 - it may only FLAG (alert email) or TRIP the existing deterministic invalidation
   or take-profit exit (either zeroes conviction so the next gated trade run sells
   toward zero) — plus maintain each thesis's high-water mark for the trailing stop;
@@ -47,6 +48,31 @@ _EVENT_WINDOW_DAYS = 3
 _EVENT_DEDUP_HOURS = 96
 
 
+def _held_symbols(settings: Settings, config: RoboConfig) -> set[str] | None:
+    """Symbols with a live broker position, or None when the broker is unreachable.
+
+    None means "unknown", and the caller then falls back to scanning every ACTIVE
+    thesis. That is the noisy direction on purpose: a broker hiccup must never
+    leave a genuinely held name unwatched, which is the whole point of the pass.
+    """
+    try:
+        from investment_monitor.robo.broker import PublicBroker
+
+        broker = PublicBroker(
+            api_token=settings.public_api_token,
+            account_id=config.account_id,
+            base_url=settings.public_api_base_url,
+            dry_run=True,  # read-only: the sentinel has no order path at all
+        )
+        account = broker.get_account_state()
+    except Exception as exc:  # noqa: BLE001 - fail open, like the price refresh
+        logger.warning(
+            f"sentinel: position lookup failed ({exc}); watching all active theses"
+        )
+        return None
+    return {p.symbol for p in getattr(account, "positions", []) if p.quantity}
+
+
 def _days_held(thesis, now: datetime | None = None) -> float:
     """Days since the thesis was created (entry-date proxy; >= 0)."""
     created = thesis.created_at
@@ -72,13 +98,22 @@ def run_sentinel(
     ecfg = getattr(config, "exits", None)
     icfg = getattr(config, "invalidation", None)
     exit_defaults = ecfg.as_conditions() if ecfg is not None and ecfg.enabled else None
+    held = _held_symbols(settings, config)
     with get_session() as session:
         # ACTIVE only: benched (WATCH) names are unsized by definition — any held
         # shares are already being sold toward 0 — so hourly quotes for them are
         # wasted; they keep their weekly re-eval coverage in maintenance instead.
+        #
+        # AND actually held: an ACTIVE thesis only means the book INTENDS to own the
+        # name — the buy may have been gate-rejected or never reached. Scanning on
+        # status alone had 19 of 24 actives with no position (13 never bought at
+        # all), which spent hourly quotes on nothing and, worse, emailed exit and
+        # 8-K alerts for names carrying zero exposure. `held is None` = broker
+        # unreachable, so fall back to the old status-only scan rather than skip.
         theses = [
             t for t in get_active_theses(session, config.account_id or None)
             if t.status == ThesisStatus.ACTIVE.value
+            and (held is None or t.symbol in held)
         ]
         if not theses:
             return {"status": "ok", "checked": 0, "tripped": [], "exited": [], "flagged": []}

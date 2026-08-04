@@ -160,6 +160,15 @@ def main(argv: list[str] | None = None) -> int:
     # Broad, universe-independent collection runs a different pipeline.
     if args.type == "collect-broad":
         from investment_monitor.broad_collect import run_broad_collection_sync
+        from investment_monitor.config import get_settings
+        from investment_monitor.logging_config import setup_logging
+
+        # This branch used to return before any sink was configured, so loguru's
+        # DEBUG-level default stderr handler stayed installed — and the cron
+        # wrapper redirects stderr into broad-collect.log. Every per-request rate
+        # limit wait was logged, growing that file to ~200MB. setup_logging()
+        # drops the default handler and honours --log-level (INFO unless asked).
+        setup_logging(log_dir=str(get_settings().log_dir), log_level=log_level)
 
         try:
             results = run_broad_collection_sync(days_back=args.days_back)
