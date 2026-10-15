@@ -70,21 +70,17 @@ def collect(
 
 @app.command()
 def label() -> None:
-    """Label unlabeled, ticker-tagged headlines bullish/bearish/neutral with the triage model."""
-    from investment_monitor.analysis.local_llm import LocalLLM
-    from investment_monitor.analysis.model_router import ModelRouter
+    """Label unlabeled, ticker-tagged headlines bullish/bearish/neutral (NEWS_LLM picks the model)."""
     from investment_monitor.analysis.news_processor import classify_unscored_sentiment
+    from investment_monitor.analysis.sentiment import build_labeler
     from investment_monitor.storage import get_session, init_db
 
     settings = get_settings()
     init_db(settings.db_path)
-    llm = LocalLLM(
-        model=ModelRouter(settings).resolve("triage", base_url=settings.ollama_host),
-        base_url=settings.ollama_host,
-    )
+    labeler = build_labeler(settings)
     with get_session() as session:
-        labeled = asyncio.run(classify_unscored_sentiment(session, llm))
-    typer.echo(f"sentiment: labeled {labeled} headlines")
+        labeled = classify_unscored_sentiment(session, labeler)
+    typer.echo(f"sentiment: labeled {labeled} headlines via {labeler.name}")
 
 
 @app.command()

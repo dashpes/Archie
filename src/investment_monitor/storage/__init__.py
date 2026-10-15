@@ -13,7 +13,6 @@ from .operations import (
     get_prices,
     get_recent_news,
     get_unclassified_news,
-    get_unscored_news,
     insider_transaction_exists,
     news_exists,
     price_exists,
@@ -91,7 +90,6 @@ __all__ = [
     "insider_transaction_exists",
     "save_news_item",
     "news_exists",
-    "get_unscored_news",
     "get_unclassified_news",
     "get_recent_news",
     # Research models

@@ -84,8 +84,9 @@ class NewsItem(Base):
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
     published_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     sentiment: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Which labeler wrote the sentiment (ollama | anthropic); provenance for audits.
+    sentiment_model: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

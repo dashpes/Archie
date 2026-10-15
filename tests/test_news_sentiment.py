@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 
 from investment_monitor.analysis.confluence import gather_news_evidence
 from investment_monitor.analysis.news_processor import classify_unscored_sentiment
@@ -38,32 +36,40 @@ def test_unclassified_query_skips_tickerless(tmp_path):
         assert [i.ticker for i in get_unclassified_news(s)] == ["AAA"]
 
 
+class _Fake:
+    name = "fake"
+
+    def __init__(self, labels):
+        self.labels = labels
+
+    def label(self, headlines):
+        return self.labels[: len(headlines)]
+
+
 def test_classify_batch_persists_and_retries_unknown(tmp_path):
     init_db(tmp_path / "t.db")
     with get_session() as s:
         s.add(_news("AAA", "record earnings"))
         s.add(_news("BBB", "mystery item"))
-    llm = MagicMock()
-    llm.is_available.return_value = True
-    llm.classify_sentiment = AsyncMock(side_effect=["bullish", "unknown"])
     with get_session() as s:
-        assert asyncio.run(classify_unscored_sentiment(s, llm)) == 1
+        assert classify_unscored_sentiment(s, _Fake(["bullish", None])) == 1
     with get_session() as s:
-        by_headline = {i.headline: i.sentiment for i in get_recent_news(s, hours=48)}
-        assert by_headline["record earnings"] == "bullish"
-        assert by_headline["mystery item"] is None      # left NULL -> retried next pass
-        # And it IS retried: still in the unclassified queue.
+        rows = {i.headline: (i.sentiment, i.sentiment_model) for i in get_recent_news(s, hours=48)}
+        assert rows["record earnings"] == ("bullish", "fake")
+        assert rows["mystery item"] == (None, None)      # left NULL -> retried next pass
         assert [i.headline for i in get_unclassified_news(s)] == ["mystery item"]
 
 
-def test_classify_noop_without_llm(tmp_path):
+def test_classify_noop_with_none_labeler(tmp_path):
+    from investment_monitor.analysis.sentiment import NoneLabeler
+
     init_db(tmp_path / "t.db")
     with get_session() as s:
         s.add(_news("AAA", "something"))
-    llm = MagicMock()
-    llm.is_available.return_value = False
     with get_session() as s:
-        assert asyncio.run(classify_unscored_sentiment(s, llm)) == 0
+        assert classify_unscored_sentiment(s, NoneLabeler()) == 0
+    with get_session() as s:
+        assert [i.headline for i in get_unclassified_news(s)] == ["something"]
 
 
 def test_confluence_news_excludes_bearish(tmp_path):

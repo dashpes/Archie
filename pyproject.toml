@@ -26,7 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 ai = [
     "ollama>=0.1.0",
-    "anthropic>=0.18.0",
+    "anthropic>=0.100.0",
 ]
 robo = [
     # Public.com official Trading API SDK (import root: public_api_sdk).

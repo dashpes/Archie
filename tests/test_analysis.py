@@ -6,7 +6,6 @@ import pytest
 
 from investment_monitor.analysis import (
     LocalLLM,
-    RELEVANCE_PROMPT,
     SENTIMENT_PROMPT,
 )
 from investment_monitor.analysis.local_llm import LocalLLM as LocalLLMClass
@@ -19,23 +18,6 @@ from investment_monitor.analysis.local_llm import LocalLLM as LocalLLMClass
 
 class TestPromptTemplates:
     """Test the prompt templates are properly formatted."""
-
-    def test_relevance_prompt_has_placeholders(self):
-        """Relevance prompt should contain required placeholders."""
-        assert "{ticker}" in RELEVANCE_PROMPT
-        assert "{company_name}" in RELEVANCE_PROMPT
-        assert "{headline}" in RELEVANCE_PROMPT
-
-    def test_relevance_prompt_can_be_formatted(self):
-        """Relevance prompt should format correctly."""
-        formatted = RELEVANCE_PROMPT.format(
-            ticker="AAPL",
-            company_name="Apple Inc.",
-            headline="Apple announces new iPhone",
-        )
-        assert "AAPL" in formatted
-        assert "Apple Inc." in formatted
-        assert "Apple announces new iPhone" in formatted
 
     def test_sentiment_prompt_has_placeholders(self):
         """Sentiment prompt should contain required placeholders."""
@@ -140,48 +122,6 @@ class TestLocalLLMAvailability:
 # =============================================================================
 
 
-class TestScoreParsing:
-    """Test the _parse_score static method."""
-
-    @pytest.mark.parametrize("response,expected", [
-        ("7", 7.0),
-        ("7.5", 7.5),
-        ("  8  ", 8.0),
-        ("Rating: 6", 6.0),
-        ("rating: 9", 9.0),
-        ("7/10", 7.0),
-        ("7 out of 10", 7.0),
-        ("I would rate this a 8", 8.0),
-        ("The relevance score is 5", 5.0),
-        ("10", 10.0),
-        ("1", 1.0),
-    ])
-    def test_parse_score_valid_inputs(self, response: str, expected: float):
-        """Should correctly parse valid score formats."""
-        assert LocalLLMClass._parse_score(response) == expected
-
-    @pytest.mark.parametrize("response,expected", [
-        ("", None),
-        (None, None),
-        ("no numbers here", None),
-        ("bullish", None),
-    ])
-    def test_parse_score_invalid_inputs(self, response: str | None, expected: float | None):
-        """Should return None for invalid inputs."""
-        assert LocalLLMClass._parse_score(response) == expected
-
-    def test_parse_score_clamps_high_values(self):
-        """Should clamp scores above 10 to 10."""
-        assert LocalLLMClass._parse_score("15") == 10.0
-        assert LocalLLMClass._parse_score("100") == 10.0
-
-    def test_parse_score_clamps_negative_values(self):
-        """Should clamp negative scores to 0."""
-        # Note: regex won't match negative numbers with current pattern,
-        # but if it did, they should be clamped
-        assert LocalLLMClass._parse_score("0") == 0.0
-
-
 # =============================================================================
 # Sentiment Parsing Tests
 # =============================================================================
@@ -242,69 +182,6 @@ class TestSentimentParsing:
 # =============================================================================
 # Relevance Scoring Tests
 # =============================================================================
-
-
-class TestScoreRelevance:
-    """Test the score_relevance method."""
-
-    @pytest.mark.asyncio
-    async def test_score_relevance_returns_negative_when_unavailable(self):
-        """Should return -1 when Ollama is not available."""
-        llm = LocalLLM()
-
-        with patch.object(llm, "is_available", return_value=False):
-            score = await llm.score_relevance(
-                headline="Apple announces new product",
-                ticker="AAPL",
-            )
-            assert score == -1.0
-
-    @pytest.mark.asyncio
-    async def test_score_relevance_returns_valid_score(self):
-        """Should return parsed score when LLM responds."""
-        llm = LocalLLM()
-
-        with patch.object(llm, "is_available", return_value=True):
-            with patch.object(llm, "_generate", return_value="8"):
-                score = await llm.score_relevance(
-                    headline="Apple announces new iPhone",
-                    ticker="AAPL",
-                    company_name="Apple Inc.",
-                )
-                assert score == 8.0
-
-    @pytest.mark.asyncio
-    async def test_score_relevance_handles_generation_failure(self):
-        """Should return -1 when generation fails."""
-        llm = LocalLLM()
-
-        with patch.object(llm, "is_available", return_value=True):
-            with patch.object(llm, "_generate", return_value=None):
-                score = await llm.score_relevance(
-                    headline="Some headline",
-                    ticker="TEST",
-                )
-                assert score == -1.0
-
-    @pytest.mark.asyncio
-    async def test_score_relevance_uses_ticker_as_company_name_fallback(self):
-        """Should use ticker as company name when not provided."""
-        llm = LocalLLM()
-        generated_prompt = None
-
-        def capture_prompt(prompt):
-            nonlocal generated_prompt
-            generated_prompt = prompt
-            return "7"
-
-        with patch.object(llm, "is_available", return_value=True):
-            with patch.object(llm, "_generate", side_effect=capture_prompt):
-                await llm.score_relevance(
-                    headline="Test headline",
-                    ticker="AAPL",
-                )
-                assert generated_prompt is not None
-                assert "AAPL" in generated_prompt
 
 
 # =============================================================================
@@ -441,28 +318,6 @@ class TestLocalLLMIntegration:
         return mock_module, mock_client_instance
 
     @pytest.mark.asyncio
-    async def test_full_relevance_scoring_flow(self, mock_ollama_module):
-        """Test complete relevance scoring flow."""
-        mock_module, mock_client = mock_ollama_module
-        mock_client.list.return_value = {"models": [{"name": "phi3:mini"}]}
-        mock_client.generate.return_value = {"response": "8"}
-
-        llm = LocalLLM()
-
-        with patch.dict("sys.modules", {"ollama": mock_module}):
-            # Manually set up client since we're mocking the import
-            llm._client = mock_client
-
-            with patch.object(llm, "is_available", return_value=True):
-                score = await llm.score_relevance(
-                    headline="Apple reports record iPhone sales",
-                    ticker="AAPL",
-                    company_name="Apple Inc.",
-                )
-
-            assert score == 8.0
-
-    @pytest.mark.asyncio
     async def test_full_sentiment_classification_flow(self, mock_ollama_module):
         """Test complete sentiment classification flow."""
         mock_module, mock_client = mock_ollama_module
@@ -488,10 +343,8 @@ class TestLocalLLMIntegration:
 
         # Simulate connection refused
         with patch.object(llm, "is_available", return_value=False):
-            score = await llm.score_relevance("Test headline", "TEST")
             sentiment = await llm.classify_sentiment("Test headline")
 
-            assert score == -1.0
             assert sentiment == "unknown"
 
 

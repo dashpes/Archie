@@ -94,17 +94,6 @@ def news_exists(session: Session, url: str) -> bool:
     return session.scalar(stmt) is not None
 
 
-def get_unscored_news(session: Session, limit: int = 100) -> list[NewsItem]:
-    """Get news items without relevance scores."""
-    stmt = (
-        select(NewsItem)
-        .where(NewsItem.relevance_score.is_(None))
-        .order_by(NewsItem.created_at.desc())
-        .limit(limit)
-    )
-    return list(session.scalars(stmt))
-
-
 def get_unclassified_news(session: Session, limit: int = 200) -> list[NewsItem]:
     """Ticker-tagged news items with no sentiment label yet (newest first).
 

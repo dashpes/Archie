@@ -1,7 +1,7 @@
 """Configuration management using Pydantic."""
 
 from pathlib import Path
-from typing import Any
+from typing import Literal, Any
 
 import yaml
 from pydantic import BaseModel, Field
@@ -76,21 +76,12 @@ class Settings(BaseSettings):
     # rate-limit or block an anonymous/placeholder agent.
     sec_contact_email: str = ""
 
-    # Ollama
+    # News sentiment labeler: ollama (local), anthropic (Claude Haiku), or none.
+    # A headline is labeled once; "none" leaves rows NULL for a later backfill.
+    news_llm: Literal["ollama", "anthropic", "none"] = "ollama"
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "phi3:mini"
-
-    # Per-role model routing (Phase 5). A small/fast model triages; a stronger
-    # model synthesizes theses. Any role left
-    # blank falls back to ollama_model. Override individual roles in .env, e.g.
-    # MODEL_ROLES__SYNTHESIS=qwen2.5:14b
-    model_roles: dict[str, str] = Field(
-        default_factory=lambda: {
-            "triage": "phi3:mini",
-            "synthesis": "qwen2.5:14b",
-            "scoring": "phi3:mini",
-        }
-    )
+    anthropic_model: str = "claude-haiku-5-5"
 
     # Public.com robo advisor (trading) — secret token from env only
     public_api_token: str = ""

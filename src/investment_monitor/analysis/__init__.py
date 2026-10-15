@@ -2,7 +2,7 @@
 
 from .local_llm import LocalLLM
 from .news_processor import classify_unscored_sentiment
-from .prompts import RELEVANCE_PROMPT, SENTIMENT_PROMPT
+from .prompts import SENTIMENT_PROMPT
 from .research_prompts import (
     GROWTH_SCORE_PROMPT,
     MOMENTUM_SCORE_PROMPT,
@@ -13,11 +13,11 @@ from .research_prompts import (
     VALUE_SCORE_PROMPT,
 )
 from .research_scorer import ResearchScorer, ScoreResult
+from .sentiment import SentimentLabeler, build_labeler
 
 __all__ = [
     "LocalLLM",
     "classify_unscored_sentiment",
-    "RELEVANCE_PROMPT",
     "SENTIMENT_PROMPT",
     "VALUE_SCORE_PROMPT",
     "GROWTH_SCORE_PROMPT",
@@ -28,4 +28,6 @@ __all__ = [
     "PROMPT_PLACEHOLDERS",
     "ResearchScorer",
     "ScoreResult",
+    "SentimentLabeler",
+    "build_labeler",
 ]

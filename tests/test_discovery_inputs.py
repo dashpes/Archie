@@ -29,7 +29,7 @@ class _Txn:
 @dataclass
 class _News:
     headline: str
-    relevance_score: float | None
+    published_at: object
 
 
 def _series(days: int, start: float, end: float) -> list[_P]:
@@ -76,13 +76,15 @@ def test_insider_summary_net_direction():
     assert "net selling" in summarize_insider_activity([_Txn("S", 1_000_000.0)])
 
 
-def test_news_summary_ranks_by_relevance():
+def test_news_summary_ranks_by_recency():
+    from datetime import datetime
+
     items = [
-        _News("boring recap", 0.1),
-        _News("CEO resigns amid probe", 0.9),
-        _News("earnings beat", 0.5),
+        _News("boring recap", datetime(2026, 1, 1)),
+        _News("CEO resigns amid probe", datetime(2026, 1, 3)),
+        _News("new product", datetime(2026, 1, 2)),
     ]
-    s = summarize_recent_news(items, max_headlines=2)
-    assert s.startswith("3 headlines")
-    assert "CEO resigns" in s and "earnings beat" in s and "boring recap" not in s
-    assert summarize_recent_news([]) == "No recent news available"
+    out = summarize_recent_news(items, max_headlines=2)
+    assert "3 headlines" in out
+    assert out.index("CEO resigns") < out.index("new product")
+    assert "boring" not in out

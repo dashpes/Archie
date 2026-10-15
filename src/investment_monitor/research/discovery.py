@@ -118,12 +118,12 @@ def summarize_insider_activity(txns: list) -> str:
 
 
 def summarize_recent_news(items: list, *, max_headlines: int = 3) -> str:
-    """Headline count + most-relevant titles for the sentiment prompt."""
+    """Headline count + newest titles for the sentiment prompt."""
     if not items:
         return "No recent news available"
-    ranked = sorted(items, key=lambda i: (i.relevance_score or 0.0), reverse=True)
+    ranked = sorted(items, key=lambda i: (i.published_at or datetime.min, i.headline or ""), reverse=True)
     heads = "; ".join((i.headline or "")[:120] for i in ranked[:max_headlines])
-    return f"{len(items)} headlines in the last 14d. Most relevant: {heads}"
+    return f"{len(items)} headlines in the last 14d. Newest: {heads}"
 
 
 @dataclass

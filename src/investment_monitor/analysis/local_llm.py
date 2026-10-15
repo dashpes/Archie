@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from .prompts import RELEVANCE_PROMPT, SENTIMENT_PROMPT
+from .prompts import SENTIMENT_PROMPT
 
 if TYPE_CHECKING:
     import ollama
@@ -16,8 +15,7 @@ if TYPE_CHECKING:
 class LocalLLM:
     """Client wrapper for Ollama local LLM inference.
 
-    Provides methods for news relevance scoring, sentiment analysis,
-    and text summarization using local Ollama models.
+    Provides headline sentiment classification with a local Ollama model.
     """
 
     def __init__(
@@ -121,39 +119,6 @@ class LocalLLM:
             logger.debug(f"LLM generation failed: {e}")
             return None
 
-    async def score_relevance(
-        self,
-        headline: str,
-        ticker: str,
-        company_name: str = "",
-    ) -> float:
-        """Score how relevant a news headline is to a specific stock.
-
-        Args:
-            headline: The news headline to evaluate.
-            ticker: The stock ticker symbol.
-            company_name: The company name (optional, improves accuracy).
-
-        Returns:
-            A relevance score from 0-10, or -1 if LLM is unavailable.
-        """
-        if not self.is_available():
-            return -1.0
-
-        prompt = RELEVANCE_PROMPT.format(
-            ticker=ticker,
-            company_name=company_name or ticker,
-            headline=headline,
-        )
-
-        response = self._generate(prompt)
-        if response is None:
-            return -1.0
-
-        # Parse the response to extract a number
-        score = self._parse_score(response)
-        return score if score is not None else -1.0
-
     async def classify_sentiment(
         self,
         text: str,
@@ -168,59 +133,14 @@ class LocalLLM:
         """
         if not self.is_available():
             return "unknown"
+        return self.sentiment(text)
 
-        prompt = SENTIMENT_PROMPT.format(headline=text)
-
-        response = self._generate(prompt)
+    def sentiment(self, text: str) -> str:
+        """Synchronous sentiment classification; the caller checks availability."""
+        response = self._generate(SENTIMENT_PROMPT.format(headline=text))
         if response is None:
             return "unknown"
-
-        # Parse the response to extract sentiment
-        sentiment = self._parse_sentiment(response)
-        return sentiment
-
-    @staticmethod
-    def _parse_score(response: str) -> float | None:
-        """Parse a relevance score from LLM response.
-
-        Handles various formats LLMs might use:
-        - Just a number: "7"
-        - With decimals: "7.5"
-        - With text: "Rating: 7" or "7/10"
-        - Verbose: "I would rate this a 7 out of 10"
-
-        Args:
-            response: The raw LLM response.
-
-        Returns:
-            The parsed score (0-10), or None if parsing fails.
-        """
-        if not response:
-            return None
-
-        # Clean up the response
-        response = response.strip().lower()
-
-        # Try to find a number in the response
-        # First, try to match a decimal or integer at the start or standalone
-        patterns = [
-            r"^(\d+\.?\d*)",          # Number at start
-            r"rating[:\s]*(\d+\.?\d*)",  # "Rating: X" format
-            r"(\d+\.?\d*)\s*(?:/\s*10|out of 10)",  # "X/10" or "X out of 10"
-            r"\b(\d+\.?\d*)\b",        # Any standalone number
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, response)
-            if match:
-                try:
-                    score = float(match.group(1))
-                    # Clamp to valid range
-                    return max(0.0, min(10.0, score))
-                except ValueError:
-                    continue
-
-        return None
+        return self._parse_sentiment(response)
 
     @staticmethod
     def _parse_sentiment(response: str) -> str:
@@ -263,3 +183,24 @@ class LocalLLM:
                 return "bearish"
 
         return "unknown"
+
+
+def resolve_installed_model(preferred: str, base_url: str | None = None) -> str:
+    """Return ``preferred`` if Ollama has it, else an installed model of the same family.
+
+    Same family means the same name before the ``:`` tag (``qwen2.5:7b`` resolves to
+    an installed ``qwen2.5:14b``). When Ollama cannot be queried the configured name
+    is returned unchanged and the caller's availability check decides.
+    """
+    try:
+        import ollama
+
+        client = ollama.Client(host=base_url) if base_url else ollama.Client()
+        installed = [m.model for m in client.list().models]
+    except Exception:  # noqa: BLE001 - cannot list -> trust the configured name
+        return preferred
+    if not installed or preferred in installed:
+        return preferred
+    base = preferred.split(":")[0]
+    family = [m for m in installed if m.split(":")[0] == base]
+    return family[0] if family else preferred
