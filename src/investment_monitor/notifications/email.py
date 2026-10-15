@@ -1,10 +1,7 @@
 """Email notification channel (SMTP).
 
 Sends notifications through any SMTP server (Gmail, Fastmail, a private relay, …).
-Unlike the iMessage channel, this needs no GUI session, no Messages.app, and no
-Automation grant — so it works from a background launchd *daemon* that runs whether
-or not anyone is logged in. That makes it the transport of choice for the autonomous
-robo advisor once it runs headless.
+It needs no GUI session, so it works from a container or a background service.
 
 Gmail setup: turn on 2-Step Verification, then create an App Password (Google
 Account > Security > App passwords) and use that 16-char value as ``SMTP_PASSWORD``
@@ -17,18 +14,15 @@ raised, so notifications can never affect trading or a monitor run.
 
 from __future__ import annotations
 
-import asyncio
 import smtplib
 import ssl
 from email.message import EmailMessage
 
 from loguru import logger
 
-from .base import AlertMessage, NotificationChannel
 
-
-class EmailChannel(NotificationChannel):
-    """Sends alerts as plain-text email over SMTP.
+class EmailChannel:
+    """Sends email over SMTP, plain text with an optional HTML alternative.
 
     Args:
         host: SMTP server hostname (e.g. ``smtp.gmail.com``).
@@ -44,8 +38,6 @@ class EmailChannel(NotificationChannel):
     """
 
     name = "email"
-    # The robo notify layer checks this to decide whether to build/pass an HTML
-    # alternative (iMessage and other channels never see one).
     supports_html = True
 
     def __init__(
@@ -133,16 +125,3 @@ class EmailChannel(NotificationChannel):
         self._logger.debug("email sent to {to}", to=self._recipient)
         return True
 
-    async def send(self, message: AlertMessage) -> bool:
-        """Send a single alert (NotificationChannel API; offloads the blocking call)."""
-        body = message.format_full() if message.ticker or message.url else (
-            f"{message.title}\n{message.body}"
-        )
-        return await asyncio.to_thread(self.send_text, body, message.format_short())
-
-    async def send_digest(self, messages: list[AlertMessage]) -> bool:
-        """Send a batch of alerts as one email (NotificationChannel API)."""
-        if not messages:
-            return True
-        lines = [m.format_short() for m in messages]
-        return await asyncio.to_thread(self.send_text, "\n".join(lines))

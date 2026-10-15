@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from investment_monitor.notifications.base import AlertMessage, Priority
 from investment_monitor.notifications.email import EmailChannel
 
 HOST = "smtp.gmail.com"
@@ -149,32 +148,3 @@ class TestEmailSend:
             assert _channel().send_text("hi") is False
 
 
-class TestEmailAsyncAPI:
-    @pytest.mark.asyncio
-    async def test_send_delegates_to_send_text(self):
-        channel = _channel()
-        msg = AlertMessage(
-            title="AAPL up 3%", body="details", alert_type="price", priority=Priority.HIGH
-        )
-        with patch.object(channel, "send_text", return_value=True) as mock_send:
-            assert await channel.send(msg) is True
-        mock_send.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_send_digest_empty_is_true(self):
-        channel = _channel()
-        with patch.object(channel, "send_text") as mock_send:
-            assert await channel.send_digest([]) is True
-        mock_send.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_send_digest_joins_messages(self):
-        channel = _channel()
-        msgs = [
-            AlertMessage(title="one", body="b", alert_type="x"),
-            AlertMessage(title="two", body="b", alert_type="x", ticker="AAPL"),
-        ]
-        with patch.object(channel, "send_text", return_value=True) as mock_send:
-            assert await channel.send_digest(msgs) is True
-        sent = mock_send.call_args.args[0]
-        assert "one" in sent and "[AAPL] two" in sent

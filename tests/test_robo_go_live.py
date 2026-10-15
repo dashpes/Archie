@@ -17,7 +17,7 @@ from investment_monitor.config import Settings
 from investment_monitor.robo.broker import PlacedOrder, PreflightResult, account_state_from_raw
 from investment_monitor.robo.config import RoboCaps, RoboConfig, SizingConfig
 from investment_monitor.robo.market_hours import is_market_open
-from investment_monitor.robo.models import AccountState, Position
+from investment_monitor.robo.models import AccountState
 from investment_monitor.robo.rebalance import rebalance_run
 from investment_monitor.storage import (
     SimulationResult,

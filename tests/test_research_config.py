@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from investment_monitor.models import (
-    ClaudeBudgetConfig,
     ResearchConfig,
     ResearchThresholds,
     ScoringWeights,
@@ -148,7 +147,6 @@ class TestUniverseConfig:
         config = UniverseConfig()
         assert config.include_sp500 is True
         assert config.include_nasdaq100 is True
-        assert config.etf_tickers == []
         assert config.min_market_cap == 1_000_000_000
         assert config.excluded_sectors == []
         assert config.excluded_tickers == []
@@ -158,14 +156,12 @@ class TestUniverseConfig:
         config = UniverseConfig(
             include_sp500=False,
             include_nasdaq100=True,
-            etf_tickers=["QQQ", "SPY", "VTI"],
             min_market_cap=10_000_000_000,
             excluded_sectors=["Energy", "Utilities"],
             excluded_tickers=["XOM", "CVX"],
         )
         assert config.include_sp500 is False
         assert config.include_nasdaq100 is True
-        assert config.etf_tickers == ["QQQ", "SPY", "VTI"]
         assert config.min_market_cap == 10_000_000_000
         assert config.excluded_sectors == ["Energy", "Utilities"]
         assert config.excluded_tickers == ["XOM", "CVX"]
@@ -189,10 +185,12 @@ class TestUniverseConfig:
     def test_empty_lists_default(self):
         """Test that list fields default to empty lists."""
         config = UniverseConfig()
+        assert config.excluded_sectors == []
+        assert config.excluded_tickers == []
         # Ensure they're actually mutable (not shared)
-        config.etf_tickers.append("TEST")
         another_config = UniverseConfig()
-        assert "TEST" not in another_config.etf_tickers
+        config.excluded_tickers.append("TEST")
+        assert "TEST" not in another_config.excluded_tickers
 
 
 # ============================================================================
@@ -248,53 +246,6 @@ class TestResearchThresholds:
 # ============================================================================
 
 
-class TestClaudeBudgetConfig:
-    """Tests for ClaudeBudgetConfig model."""
-
-    def test_defaults(self):
-        """Test default values are sensible."""
-        config = ClaudeBudgetConfig()
-        assert config.enabled is True
-        assert config.monthly_limit_usd == 50.0
-        assert config.max_reports_per_day == 10
-
-    def test_custom_values(self):
-        """Test custom values are accepted."""
-        config = ClaudeBudgetConfig(
-            enabled=False,
-            monthly_limit_usd=100.0,
-            max_reports_per_day=20,
-        )
-        assert config.enabled is False
-        assert config.monthly_limit_usd == 100.0
-        assert config.max_reports_per_day == 20
-
-    def test_zero_budget_allowed(self):
-        """Test that zero budget is allowed."""
-        config = ClaudeBudgetConfig(monthly_limit_usd=0.0)
-        assert config.monthly_limit_usd == 0.0
-
-    def test_negative_budget_rejected(self):
-        """Test that negative budget is rejected."""
-        with pytest.raises(ValueError):
-            ClaudeBudgetConfig(monthly_limit_usd=-1.0)
-
-    def test_zero_reports_rejected(self):
-        """Test that zero reports per day is rejected."""
-        with pytest.raises(ValueError):
-            ClaudeBudgetConfig(max_reports_per_day=0)
-
-    def test_minimum_reports_boundary(self):
-        """Test that 1 report per day is allowed."""
-        config = ClaudeBudgetConfig(max_reports_per_day=1)
-        assert config.max_reports_per_day == 1
-
-    def test_disabled_still_validates(self):
-        """Test that disabled config still validates other fields."""
-        with pytest.raises(ValueError):
-            ClaudeBudgetConfig(enabled=False, max_reports_per_day=0)
-
-
 # ============================================================================
 # ResearchConfig Tests
 # ============================================================================
@@ -309,7 +260,6 @@ class TestResearchConfig:
         assert config.scoring_weights.value == 0.2
         assert config.universe.include_sp500 is True
         assert config.thresholds.min_composite_score == 60.0
-        assert config.claude_budget.enabled is True
         assert config.discovery_batch_size == 50
 
     def test_custom_batch_size(self):
@@ -350,7 +300,6 @@ class TestResearchConfig:
         # Default values preserved
         assert config.universe.include_nasdaq100 is True  # default
         assert config.thresholds.min_composite_score == 60.0  # entire section defaults
-        assert config.claude_budget.enabled is True  # entire section defaults
 
     def test_from_yaml_full_config(self):
         """Test loading a full configuration from YAML."""
@@ -365,9 +314,6 @@ scoring_weights:
 universe:
   include_sp500: true
   include_nasdaq100: false
-  etf_tickers:
-    - QQQ
-    - VTI
   min_market_cap: 5000000000
   excluded_sectors:
     - Energy
@@ -379,7 +325,6 @@ thresholds:
   auto_watchlist_score: 80.0
   auto_reject_score: 25.0
 
-claude_budget:
   enabled: true
   monthly_limit_usd: 75.0
   max_reports_per_day: 15
@@ -402,7 +347,6 @@ discovery_batch_size: 75
             # Universe settings
             assert config.universe.include_sp500 is True
             assert config.universe.include_nasdaq100 is False
-            assert config.universe.etf_tickers == ["QQQ", "VTI"]
             assert config.universe.min_market_cap == 5_000_000_000
             assert config.universe.excluded_sectors == ["Energy"]
             assert config.universe.excluded_tickers == ["XOM"]
@@ -413,9 +357,6 @@ discovery_batch_size: 75
             assert config.thresholds.auto_reject_score == 25.0
 
             # Claude budget
-            assert config.claude_budget.enabled is True
-            assert config.claude_budget.monthly_limit_usd == 75.0
-            assert config.claude_budget.max_reports_per_day == 15
 
             # Batch size
             assert config.discovery_batch_size == 75
@@ -446,8 +387,6 @@ thresholds:
             # Defaults for other sections
             assert config.universe.include_sp500 is True
             assert config.universe.min_market_cap == 1_000_000_000
-            assert config.claude_budget.enabled is True
-            assert config.claude_budget.monthly_limit_usd == 50.0
             assert config.discovery_batch_size == 50
 
     def test_from_yaml_empty_file(self):
@@ -463,7 +402,6 @@ thresholds:
             assert config.scoring_weights.value == 0.2
             assert config.universe.include_sp500 is True
             assert config.thresholds.min_composite_score == 60.0
-            assert config.claude_budget.enabled is True
             assert config.discovery_batch_size == 50
 
     def test_from_yaml_invalid_weights_rejected(self):
@@ -542,7 +480,6 @@ universe:
         # Verify universe settings match model defaults
         assert config.universe.include_sp500 is True
         assert config.universe.include_nasdaq100 is True
-        assert config.universe.etf_tickers == []
         assert config.universe.min_market_cap == 1_000_000_000
 
         # Verify thresholds match model defaults
@@ -551,9 +488,6 @@ universe:
         assert config.thresholds.auto_reject_score == 30.0
 
         # Verify claude budget settings match model defaults
-        assert config.claude_budget.enabled is True
-        assert config.claude_budget.monthly_limit_usd == 50.0
-        assert config.claude_budget.max_reports_per_day == 10
 
         # Verify discovery batch size matches model default
         assert config.discovery_batch_size == 50

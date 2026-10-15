@@ -20,7 +20,6 @@ from .engine import SimulationEngine
 from .models import (
     HorizonResult,
     ScenarioResult,
-    SensitivityResult,
     SimulationConfig,
     SimulationOutput,
 )
@@ -400,7 +399,7 @@ class MonteCarloAnalyzer:
         )
 
         if data.empty:
-            logger.warning(f"No data for beta calculation, using default beta=1.0")
+            logger.warning("No data for beta calculation, using default beta=1.0")
             return 1.0
 
         try:
@@ -411,7 +410,7 @@ class MonteCarloAnalyzer:
             # Align indices
             common_idx = stock_prices.index.intersection(market_prices.index)
             if len(common_idx) < 30:
-                logger.warning(f"Insufficient data for beta, using default beta=1.0")
+                logger.warning("Insufficient data for beta, using default beta=1.0")
                 return 1.0
 
             stock_prices = stock_prices.loc[common_idx]

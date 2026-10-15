@@ -242,7 +242,6 @@ def test_price_context_set_on_finding(tmp_path):
 
 
 def test_news_evidence_requires_min_items(tmp_path):
-    from datetime import datetime
 
     from investment_monitor.analysis.confluence import gather_news_evidence
     from investment_monitor.storage import NewsItem
@@ -264,7 +263,6 @@ def test_news_evidence_requires_min_items(tmp_path):
 
 def test_news_alone_cannot_qualify_a_finding(tmp_path):
     # 2 insiders ($120k) + 3 headlines but NO volume — news must not make it a finding.
-    from datetime import datetime
 
     from investment_monitor.storage import NewsItem
 
@@ -285,7 +283,6 @@ def test_news_alone_cannot_qualify_a_finding(tmp_path):
 def test_news_evidence_filters_by_published_not_ingestion(tmp_path):
     # Articles published weeks before `today` but re-ingested now (created_at = now)
     # must NOT count as fresh corroboration — score by published_at, not created_at.
-    from datetime import datetime
 
     from investment_monitor.analysis.confluence import gather_news_evidence
     from investment_monitor.storage import NewsItem

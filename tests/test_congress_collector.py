@@ -3,9 +3,8 @@
 import tempfile
 from datetime import date
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import httpx
 import pytest
 
 from investment_monitor.collectors.congress import CongressTradesCollector
@@ -335,278 +334,33 @@ class TestDeduplication:
         assert collector._trade_exists(trade2) is False
 
 
-class TestFetchTrades:
-    """Tests for fetching trades from APIs."""
-
-    @pytest.mark.asyncio
-    async def test_fetch_house_trades_success(self, collector):
-        """Test successful House trades fetch with mocked response."""
-        # Use MagicMock for response since json() is synchronous
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            trades = await collector.fetch_house_trades()
-
-            assert len(trades) == 3
-            assert trades[0]["representative"] == "Hon. Nancy Pelosi"
-
-    @pytest.mark.asyncio
-    async def test_fetch_senate_trades_success(self, collector):
-        """Test successful Senate trades fetch with mocked response."""
-        # Use MagicMock for response since json() is synchronous
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            trades = await collector.fetch_senate_trades()
-
-            assert len(trades) == 2
-            assert trades[0]["senator"] == "Sen. John Smith"
-
-    @pytest.mark.asyncio
-    async def test_fetch_trades_network_error(self, collector):
-        """Test handling of network errors during fetch."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = httpx.HTTPStatusError(
-                "Server error", request=MagicMock(), response=MagicMock()
-            )
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            with pytest.raises(Exception):
-                await collector.fetch_house_trades()
-
-
 class TestCollect:
-    """Tests for the main collect method."""
+    """collect(tickers) filters the Senate eFD feed to the requested tickers."""
 
     @pytest.mark.asyncio
     async def test_collect_filters_by_ticker(self, collector, db_session):
-        """Test that collect only saves trades for specified tickers."""
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_house_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            # First call returns House, second returns Senate
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            # Only collect AAPL trades
+        with patch.object(collector, "fetch_senate_efd_trades", return_value=SAMPLE_SENATE_TRADES):
             result = await collector.collect(["AAPL"])
-
-            assert result.success is True
-            # Should have: 2 House AAPL + 1 Senate AAPL = 3 AAPL trades
-            assert result.records_collected == 3
+        assert result.success is True
+        assert result.records_collected == 1
+        assert get_trades_for_ticker(db_session, "AAPL", days=3650)
 
     @pytest.mark.asyncio
-    async def test_collect_handles_house_error(self, collector, db_session):
-        """Test that collect handles House API errors gracefully."""
-        # Disable retries for this test to avoid consuming mock side_effects
-        collector.max_retries = 0
+    async def test_collect_is_idempotent(self, collector, db_session):
+        with patch.object(collector, "fetch_senate_efd_trades", return_value=SAMPLE_SENATE_TRADES):
+            first = await collector.collect(["AAPL"])
+            second = await collector.collect(["AAPL"])
+        assert first.records_collected == 1
+        assert second.records_collected == 0
 
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Error", request=MagicMock(), response=MagicMock()
-        )
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
+    @pytest.mark.asyncio
+    async def test_collect_reports_fetch_failure(self, collector):
+        with patch.object(collector, "fetch_senate_efd_trades", side_effect=RuntimeError("down")):
             result = await collector.collect(["AAPL"])
-
-            # Should still process Senate trades
-            assert result.success is False  # Has errors
-            assert len(result.errors) > 0
-            assert result.records_collected > 0  # Senate trades saved
+        assert result.success is False
+        assert result.records_collected == 0
 
     @pytest.mark.asyncio
-    async def test_collect_deduplicates(self, collector, db_session):
-        """Test that collect deduplicates trades."""
-        # Use MagicMock for response since json() is synchronous
-        mock_response = MagicMock()
-        mock_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = []
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [mock_response, mock_senate_response]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            # First collect
-            result1 = await collector.collect(["AAPL"])
-            count1 = result1.records_collected
-
-        # Reset mocks for second collect
-        mock_response2 = MagicMock()
-        mock_response2.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_response2.raise_for_status = MagicMock()
-
-        mock_senate_response2 = MagicMock()
-        mock_senate_response2.json.return_value = []
-        mock_senate_response2.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [mock_response2, mock_senate_response2]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            # Second collect with same data
-            result2 = await collector.collect(["AAPL"])
-            count2 = result2.records_collected
-
-        # Second collect should save 0 (all duplicates)
-        assert count1 > 0
-        assert count2 == 0
-
-    @pytest.mark.asyncio
-    async def test_collect_case_insensitive_tickers(self, collector, db_session):
-        """Test that ticker matching is case-insensitive."""
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_house_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            # Use lowercase ticker
-            result = await collector.collect(["aapl"])
-
-            assert result.success is True
-            assert result.records_collected == 3  # Should still match AAPL trades
-
-
-class TestCollectSingle:
-    """Tests for collect_single method."""
-
-    @pytest.mark.asyncio
-    async def test_collect_single_delegates_to_collect(self, collector, db_session):
-        """Test that collect_single delegates to collect."""
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_house_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            count = await collector.collect_single("MSFT")
-
-            # Should have 1 House MSFT + 1 Senate MSFT = 2 trades
-            assert count == 2
-
-
-class TestIntegration:
-    """Integration tests for the collector."""
-
-    @pytest.mark.asyncio
-    async def test_full_collection_workflow(self, collector, db_session):
-        """Test complete collection and retrieval workflow."""
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.json.return_value = SAMPLE_HOUSE_TRADES
-        mock_house_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = SAMPLE_SENATE_TRADES
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            result = await collector.collect(["AAPL", "MSFT"])
-
-            assert result.success is True
-            assert result.records_collected == 5  # All sample trades
-
-        # Verify trades are retrievable
-        aapl_trades = get_trades_for_ticker(db_session, "AAPL", days=365)
-        assert len(aapl_trades) == 3  # 2 House + 1 Senate
-
-        msft_trades = get_trades_for_ticker(db_session, "MSFT", days=365)
-        assert len(msft_trades) == 2  # 1 House + 1 Senate
-
-    @pytest.mark.asyncio
-    async def test_collector_result_timing(self, collector, db_session):
-        """Test that CollectorResult has proper timing info."""
-        # Use MagicMock for response since json() is synchronous
-        mock_house_response = MagicMock()
-        mock_house_response.json.return_value = []
-        mock_house_response.raise_for_status = MagicMock()
-
-        mock_senate_response = MagicMock()
-        mock_senate_response.json.return_value = []
-        mock_senate_response.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = [
-                mock_house_response,
-                mock_senate_response,
-            ]
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-            result = await collector.collect(["AAPL"])
-
-            assert result.started_at is not None
-            assert result.finished_at is not None
-            assert result.finished_at >= result.started_at
-            assert result.duration_seconds >= 0
+    async def test_collect_single_delegates_to_collect(self, collector):
+        with patch.object(collector, "fetch_senate_efd_trades", return_value=SAMPLE_SENATE_TRADES):
+            assert await collector.collect_single("AAPL") == 1

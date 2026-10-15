@@ -23,11 +23,10 @@ from ..collectors import (
     UniverseCollector,
 )
 from ..config import Settings
-from ..models import ResearchConfig, ScoringWeights
+from ..models import ResearchConfig
 from ..storage import (
     CANDIDATE_STATUSES,
     CandidateScore,
-    StockCandidate,
     get_candidate_by_ticker,
     get_candidates_by_status,
     get_insider_transactions,
@@ -35,7 +34,6 @@ from ..storage import (
     get_prices,
     get_recent_news,
     get_top_candidates,
-    save_candidate,
     save_score,
 )
 
@@ -226,8 +224,7 @@ class DiscoveryPipeline:
         try:
             # Step 1: Collect universe
             logger.info("Step 1: Collecting stock universe...")
-            etf_tickers = self.research_config.universe.etf_tickers
-            universe_result = await self.universe_collector.collect(etf_tickers)
+            universe_result = await self.universe_collector.collect([])
             logger.info(
                 f"Universe collection: {universe_result.records_collected} new records"
             )

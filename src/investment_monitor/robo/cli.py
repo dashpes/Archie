@@ -609,19 +609,17 @@ def daily_summary(
 
 @app.command("notify-test")
 def notify_test() -> None:
-    """Send a test notification (email or iMessage) to confirm the channel is wired up."""
+    """Send a test email to confirm the channel is wired up."""
     settings = get_settings()
     email_on = bool((settings.smtp_host or "").strip() and (settings.email_to or "").strip())
-    imsg_on = bool((settings.imessage_to or "").strip())
-    if not (email_on or imsg_on):
+    if not email_on:
         typer.secho(
-            "No notification channel configured. Set SMTP_HOST + EMAIL_TO (email, "
-            "recommended) or IMESSAGE_TO (iMessage) in .env.",
+            "No notification channel configured. Set SMTP_HOST + EMAIL_TO in .env.",
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(code=1)
 
-    channel, target = ("email", settings.email_to) if email_on else ("iMessage", settings.imessage_to)
+    channel, target = "email", settings.email_to
     if send_test(settings):
         typer.secho(f"Sent test {channel} to {target}.", fg=typer.colors.GREEN)
     else:

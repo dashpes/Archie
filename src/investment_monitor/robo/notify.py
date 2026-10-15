@@ -42,8 +42,7 @@ _ERROR_STATUSES = {"failed", "refused", "errored"}
 def _channel(settings: Settings):
     """Build the notification channel, or None when unconfigured/unavailable.
 
-    Email (SMTP) is preferred because it works from a headless launchd daemon with
-    no GUI/Automation dependency; iMessage is a fallback for a logged-in Mac.
+    Email (SMTP) is the only transport; it needs no GUI and works from a container.
     """
     # Email (SMTP) — headless, daemon-safe. Active when host + recipient are set.
     if (settings.smtp_host or "").strip() and (settings.email_to or "").strip():
@@ -62,15 +61,6 @@ def _channel(settings: Settings):
         except Exception as exc:  # noqa: BLE001 - setup must never break a run
             logger.warning("email channel unavailable (ignored): {e}", e=exc)
 
-    # iMessage — GUI fallback; only delivers while logged in with Automation granted.
-    to = (settings.imessage_to or "").strip()
-    if to:
-        try:
-            from investment_monitor.notifications.imessage import IMessageChannel
-
-            return IMessageChannel(to)
-        except Exception as exc:  # noqa: BLE001 - setup must never break a run
-            logger.warning("iMessage channel unavailable (ignored): {e}", e=exc)
     return None
 
 
@@ -453,7 +443,7 @@ def notify_run(result: RebalanceResult, settings: Settings) -> None:
 
         if result.num_placed <= 0:
             return  # nothing executed — stay quiet
-        if result.dry_run and not settings.imessage_notify_paper:
+        if result.dry_run and not settings.notify_paper_trades:
             return  # paper placements are silent unless explicitly enabled
 
         title = (

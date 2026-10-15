@@ -43,7 +43,6 @@ from investment_monitor.storage import (
     bench_thesis,
     exit_thesis,
     get_latest_price,
-    get_latest_report,
     get_latest_score,
     get_prices,
     get_recent_news,
@@ -598,8 +597,7 @@ class ThesisEvaluator:
         """Create a fresh DRAFT thesis for a new name (None if no usable LLM output)."""
         composite_str, latest_composite = _score_block(session, symbol)
         news_str, _ = _news_block(session, symbol)
-        report = get_latest_report(session, symbol)
-        recommendation = (report.recommendation if report else None) or "n/a"
+        recommendation = "n/a"  # research reports were removed; the thesis store goes next
         latest_price = _latest_close(session, symbol)
 
         prompt = THESIS_GENERATE_PROMPT.format(
@@ -625,7 +623,7 @@ class ThesisEvaluator:
             },
             invalidation_conditions=update.invalidation_conditions,
             exit_conditions=update.exit_conditions or None,
-            evidence_refs={"report_id": getattr(report, "id", None)},
+            evidence_refs={},
             status=ThesisStatus.DRAFT.value,
             conviction_history=[{"conviction": update.conviction, "trigger": "generated"}],
         )

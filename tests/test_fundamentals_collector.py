@@ -1,6 +1,5 @@
 """Tests for the FundamentalsCollector module."""
 
-import math
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pandas as pd

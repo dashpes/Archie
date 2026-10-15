@@ -5,14 +5,12 @@ from .models import (
     AlertSent,
     Base,
     EarningsDate,
-    ETFHolding,
     InsiderTransaction,
     NewsItem,
     Price,
 )
 from .operations import (
     alert_exists_by_dedup_key,
-    get_etf_holdings,
     get_insider_transactions,
     get_latest_price,
     get_prices,
@@ -26,7 +24,6 @@ from .operations import (
     price_exists,
     save_alert,
     save_earnings_date,
-    save_etf_holdings,
     save_insider_transaction,
     save_news_item,
     save_price,
@@ -36,9 +33,6 @@ from .research_models import (
     CANDIDATE_STATUSES,
     CandidateScore,
     CongressionalTrade,
-    PerformanceTracker,
-    ResearchProfile,
-    ResearchReport,
     SimulationResult,
     StockCandidate,
 )
@@ -46,19 +40,13 @@ from .research_operations import (
     get_candidate_by_ticker,
     get_candidates_by_status,
     get_high_scoring_candidates,
-    get_latest_report,
     get_latest_score,
-    get_or_create_default_profile,
-    get_records_needing_update,
     get_score_history,
     get_simulation_results,
     get_top_candidates,
     get_trades_for_ticker,
     save_candidate,
     save_congressional_trade,
-    save_performance_record,
-    save_profile,
-    save_report,
     save_score,
     save_simulation_result,
 )
@@ -72,13 +60,6 @@ from .robo_operations import (
     get_unfilled_placed_orders,
     save_robo_order,
     save_robo_run,
-)
-from .memory_models import MemoryEmbedding
-from .memory_operations import (
-    cosine_similarity,
-    is_duplicate,
-    save_embedding,
-    search_similar,
 )
 from .thesis_models import LIVE_THESIS_STATUSES, Thesis, ThesisStatus
 from .thesis_operations import (
@@ -179,14 +160,10 @@ __all__ = [
     "get_etf_holdings",
     # Research models
     "CANDIDATE_STATUSES",
-    "ResearchProfile",
     "StockCandidate",
     "CandidateScore",
-    "ResearchReport",
-    "PerformanceTracker",
     "CongressionalTrade",
     "SimulationResult",
-    # Research operations - Profile
     "get_or_create_default_profile",
     "save_profile",
     # Research operations - Candidate
@@ -198,10 +175,8 @@ __all__ = [
     "save_score",
     "get_latest_score",
     "get_score_history",
-    # Research operations - Report
     "save_report",
     "get_latest_report",
-    # Research operations - Performance
     "save_performance_record",
     "get_records_needing_update",
     # Research operations - Congressional Trade
@@ -283,7 +258,6 @@ __all__ = [
     # Retention / cleanup
     "RetentionConfig",
     "prune_old_data",
-    # Semantic memory (Phase 5)
     "MemoryEmbedding",
     "save_embedding",
     "search_similar",

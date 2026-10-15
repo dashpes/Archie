@@ -3,7 +3,6 @@
 from datetime import datetime
 
 import httpx
-import yfinance as yf
 from bs4 import BeautifulSoup
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -20,7 +19,6 @@ class UniverseCollector(BaseCollector):
     Gathers stock tickers from:
     - S&P 500 (Wikipedia table)
     - NASDAQ 100 (Wikipedia table)
-    - Custom ETF holdings (yfinance)
 
     Saves discovered tickers as StockCandidate records with status "discovered".
     """
@@ -237,76 +235,6 @@ class UniverseCollector(BaseCollector):
 
         return tickers
 
-    async def collect_etf_holdings(self, etf_ticker: str) -> list[str]:
-        """
-        Fetch ETF holdings using yfinance.
-
-        Args:
-            etf_ticker: ETF ticker symbol (e.g., "QQQ", "SPY", "VTI")
-
-        Returns:
-            List of holding ticker symbols
-        """
-
-        def _fetch_etf_holdings() -> list[str]:
-            try:
-                etf = yf.Ticker(etf_ticker)
-
-                # Try to get holdings from fund_holding_info or similar
-                # yfinance API varies, try multiple approaches
-                holdings = []
-
-                # Method 1: Try get_holdings() if available
-                if hasattr(etf, "get_holdings"):
-                    try:
-                        holdings_data = etf.get_holdings()
-                        if holdings_data is not None and not holdings_data.empty:
-                            holdings = holdings_data.index.tolist()
-                    except Exception as e:
-                        logger.debug(f"Method 1 (get_holdings) failed for {etf_ticker}: {e}")
-
-                # Method 2: Try funds_data
-                if not holdings:
-                    try:
-                        funds_data = etf.funds_data
-                        if funds_data and hasattr(funds_data, "top_holdings"):
-                            top_holdings = funds_data.top_holdings
-                            if top_holdings is not None:
-                                holdings = list(top_holdings.index)
-                    except Exception as e:
-                        logger.debug(f"Method 2 (funds_data) failed for {etf_ticker}: {e}")
-
-                # Method 3: Try institutional_holders as last resort
-                if not holdings:
-                    try:
-                        inst_holders = etf.institutional_holders
-                        if inst_holders is not None and not inst_holders.empty:
-                            if "Holder" in inst_holders.columns:
-                                # This is typically institution names, not stock tickers
-                                pass
-                    except Exception as e:
-                        logger.debug(f"Method 3 (institutional_holders) failed for {etf_ticker}: {e}")
-
-                # Clean tickers
-                cleaned_holdings = []
-                for h in holdings:
-                    if isinstance(h, str):
-                        ticker = h.strip().upper()
-                        # Basic validation
-                        if ticker and len(ticker) <= 10:
-                            cleaned_holdings.append(ticker)
-
-                logger.info(
-                    f"Collected {len(cleaned_holdings)} holdings from ETF {etf_ticker}"
-                )
-                return cleaned_holdings
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch holdings for {etf_ticker}: {e}")
-                return []
-
-        return await self._retry_with_backoff(_fetch_etf_holdings)
-
     def _deduplicate_tickers(self, tickers: list[str]) -> list[str]:
         """
         Deduplicate and clean a list of tickers.
@@ -422,20 +350,6 @@ class UniverseCollector(BaseCollector):
                 logger.error(error_msg)
                 errors.append(error_msg)
 
-        # Collect from provided ETF tickers
-        for etf_ticker in tickers:
-            try:
-                etf_holdings = await self.collect_etf_holdings(etf_ticker)
-                source = f"etf:{etf_ticker}"
-                records, save_errors = self._save_candidates(etf_holdings, source)
-                records_collected += records
-                errors.extend(save_errors)
-                all_tickers.extend(etf_holdings)
-            except Exception as e:
-                error_msg = f"ETF {etf_ticker} collection failed: {str(e)}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
         # Commit all changes
         try:
             self.session.commit()
@@ -463,23 +377,6 @@ class UniverseCollector(BaseCollector):
         )
 
     async def collect_single(self, ticker: str) -> int:
-        """
-        Process a single ETF ticker for its holdings.
-
-        This is primarily used for collecting holdings from a single ETF.
-
-        Args:
-            ticker: ETF ticker symbol
-
-        Returns:
-            Number of records saved
-        """
-        try:
-            etf_holdings = await self.collect_etf_holdings(ticker)
-            source = f"etf:{ticker}"
-            records_saved, _ = self._save_candidates(etf_holdings, source)
-            self.session.commit()
-            return records_saved
-        except Exception as e:
-            logger.error(f"Failed to collect holdings for ETF {ticker}: {e}")
-            raise
+        """The universe has no per-ticker collection; index membership is collected whole."""
+        logger.debug(f"{self.name}: collect_single({ticker}) is a no-op")
+        return 0

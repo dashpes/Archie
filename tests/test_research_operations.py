@@ -1,6 +1,6 @@
 """Tests for research CRUD operations."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -11,26 +11,17 @@ from investment_monitor.storage.research_models import (
     CANDIDATE_STATUSES,
     CandidateScore,
     CongressionalTrade,
-    PerformanceTracker,
-    ResearchProfile,
-    ResearchReport,
     StockCandidate,
 )
 from investment_monitor.storage.research_operations import (
     get_candidate_by_ticker,
     get_candidates_by_status,
-    get_latest_report,
     get_latest_score,
-    get_or_create_default_profile,
-    get_records_needing_update,
     get_score_history,
     get_top_candidates,
     get_trades_for_ticker,
     save_candidate,
     save_congressional_trade,
-    save_performance_record,
-    save_profile,
-    save_report,
     save_score,
 )
 
@@ -42,53 +33,6 @@ def db_session():
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
-
-
-class TestProfileOperations:
-    """Tests for ResearchProfile CRUD operations."""
-
-    def test_get_or_create_default_profile_creates_new(self, db_session):
-        """Test creating default profile when none exists."""
-        profile = get_or_create_default_profile(db_session)
-        assert profile is not None
-        assert profile.name == "default"
-        assert profile.id is not None
-
-    def test_get_or_create_default_profile_returns_existing(self, db_session):
-        """Test returning existing default profile."""
-        # Create first profile
-        profile1 = get_or_create_default_profile(db_session)
-        db_session.commit()
-
-        # Get again - should return same profile
-        profile2 = get_or_create_default_profile(db_session)
-        assert profile2.id == profile1.id
-
-    def test_save_profile(self, db_session):
-        """Test saving a profile."""
-        profile = ResearchProfile(
-            name="custom",
-            investment_style="growth",
-            risk_tolerance="aggressive",
-            value_weight=0.1,
-            growth_weight=0.4,
-        )
-        profile_id = save_profile(db_session, profile)
-        assert profile_id is not None
-        assert profile.id == profile_id
-
-    def test_save_profile_update(self, db_session):
-        """Test updating an existing profile."""
-        profile = get_or_create_default_profile(db_session)
-        profile.investment_style = "value"
-        profile.risk_tolerance = "conservative"
-        save_profile(db_session, profile)
-        db_session.commit()
-
-        # Retrieve and verify
-        retrieved = get_or_create_default_profile(db_session)
-        assert retrieved.investment_style == "value"
-        assert retrieved.risk_tolerance == "conservative"
 
 
 class TestCandidateOperations:
@@ -272,142 +216,6 @@ class TestScoreOperations:
         assert len(history) == 1
 
 
-class TestReportOperations:
-    """Tests for ResearchReport CRUD operations."""
-
-    def test_save_report(self, db_session):
-        """Test saving a research report."""
-        report = ResearchReport(
-            ticker="AAPL",
-            summary="Strong buy",
-            bull_case="Services growth",
-            bear_case="Hardware slowdown",
-            thesis="Long-term hold",
-            recommendation="BUY",
-            target_price=200.0,
-        )
-        report_id = save_report(db_session, report)
-        assert report_id is not None
-        assert report.id == report_id
-
-    def test_get_latest_report(self, db_session):
-        """Test getting latest report for a ticker."""
-        report = ResearchReport(
-            ticker="GOOGL",
-            recommendation="HOLD",
-            target_price=150.0,
-        )
-        save_report(db_session, report)
-        db_session.commit()
-
-        retrieved = get_latest_report(db_session, "GOOGL")
-        assert retrieved is not None
-        assert retrieved.ticker == "GOOGL"
-        assert retrieved.recommendation == "HOLD"
-
-    def test_get_latest_report_not_found(self, db_session):
-        """Test getting report for ticker with no reports."""
-        result = get_latest_report(db_session, "NONEXISTENT")
-        assert result is None
-
-    def test_get_latest_report_multiple_reports(self, db_session):
-        """Test getting latest when multiple reports exist."""
-        # Create older report
-        report1 = ResearchReport(
-            ticker="META",
-            recommendation="HOLD",
-        )
-        save_report(db_session, report1)
-        db_session.commit()
-
-        # Create newer report
-        report2 = ResearchReport(
-            ticker="META",
-            recommendation="BUY",
-        )
-        save_report(db_session, report2)
-        db_session.commit()
-
-        # Should get the newer one (last created)
-        latest = get_latest_report(db_session, "META")
-        assert latest.recommendation == "BUY"
-
-
-class TestPerformanceOperations:
-    """Tests for PerformanceTracker CRUD operations."""
-
-    def test_save_performance_record(self, db_session):
-        """Test saving a performance record."""
-        record = PerformanceTracker(
-            ticker="AAPL",
-            entry_date=date(2026, 1, 1),
-            entry_price=175.0,
-            current_price=185.0,
-            return_30d=5.7,
-        )
-        record_id = save_performance_record(db_session, record)
-        assert record_id is not None
-        assert record.id == record_id
-
-    def test_get_records_needing_update_old_records(self, db_session):
-        """Test getting records that need updates based on age."""
-        # Create a record and manually set old updated_at
-        record = PerformanceTracker(
-            ticker="OLD",
-            entry_date=date(2026, 1, 1),
-            entry_price=100.0,
-        )
-        save_performance_record(db_session, record)
-        db_session.commit()
-
-        # Manually update the timestamp to be old
-        old_time = datetime.now() - timedelta(days=10)
-        record.updated_at = old_time
-        db_session.commit()
-
-        # Should find this record
-        needing_update = get_records_needing_update(db_session, days_since_update=7)
-        assert len(needing_update) == 1
-        assert needing_update[0].ticker == "OLD"
-
-    def test_get_records_needing_update_recent_excluded(self, db_session):
-        """Test that recently updated records are not returned."""
-        record = PerformanceTracker(
-            ticker="RECENT",
-            entry_date=date(2026, 1, 1),
-            entry_price=100.0,
-        )
-        save_performance_record(db_session, record)
-        db_session.commit()
-
-        # Recently created record should not need update
-        needing_update = get_records_needing_update(db_session, days_since_update=7)
-        assert len(needing_update) == 0
-
-    def test_get_records_needing_update_custom_days(self, db_session):
-        """Test custom days_since_update parameter."""
-        record = PerformanceTracker(
-            ticker="CUSTOM",
-            entry_date=date(2026, 1, 1),
-            entry_price=100.0,
-        )
-        save_performance_record(db_session, record)
-        db_session.commit()
-
-        # Set updated_at to 3 days ago
-        old_time = datetime.now() - timedelta(days=3)
-        record.updated_at = old_time
-        db_session.commit()
-
-        # Should find with 2-day threshold
-        needing_2days = get_records_needing_update(db_session, days_since_update=2)
-        assert len(needing_2days) == 1
-
-        # Should not find with 5-day threshold
-        needing_5days = get_records_needing_update(db_session, days_since_update=5)
-        assert len(needing_5days) == 0
-
-
 class TestCongressionalTradeOperations:
     """Tests for CongressionalTrade CRUD operations."""
 
@@ -534,12 +342,10 @@ class TestEdgeCases:
         """Test operations on empty database."""
         assert get_candidate_by_ticker(db_session, "NONE") is None
         assert get_latest_score(db_session, "NONE") is None
-        assert get_latest_report(db_session, "NONE") is None
         assert get_candidates_by_status(db_session, "discovered") == []
         assert get_top_candidates(db_session) == []
         assert get_score_history(db_session, "NONE") == []
         assert get_trades_for_ticker(db_session, "NONE") == []
-        assert get_records_needing_update(db_session) == []
 
     def test_zero_limit(self, db_session):
         """Test operations with zero limit."""
@@ -572,16 +378,11 @@ class TestEdgeCases:
         score = CandidateScore(ticker="MINIMAL")
         save_score(db_session, score)
 
-        # Report with minimal required fields
-        report = ResearchReport(ticker="MINIMAL")
-        save_report(db_session, report)
-
         db_session.commit()
 
         # All should be saved successfully
         assert get_candidate_by_ticker(db_session, "MINIMAL") is not None
         assert get_latest_score(db_session, "MINIMAL") is not None
-        assert get_latest_report(db_session, "MINIMAL") is not None
 
     def test_flush_behavior(self, db_session):
         """Test that flush makes IDs available without commit."""

@@ -38,10 +38,6 @@ universe:
   # Include Nasdaq 100 constituents in the screening universe
   include_nasdaq100: true
 
-  # Additional ETFs to extract holdings from (e.g., sector or thematic ETFs)
-  # Example: ["QQQ", "SPY", "VTI", "ARKK"]
-  etf_tickers: []
-
   # Minimum market capitalization in USD (filters out small caps)
   # Default: 1 billion ($1,000,000,000)
   min_market_cap: 1000000000
@@ -71,23 +67,6 @@ thresholds:
   # Score threshold for automatic rejection
   # Stocks scoring at or below this are automatically rejected
   auto_reject_score: 30.0
-
-# ==============================================================================
-# Claude Budget Settings
-# ==============================================================================
-# Controls spending limits for AI-powered research reports.
-# These limits help prevent unexpected API costs.
-claude_budget:
-  # Enable/disable Claude-powered research reports
-  # Set to false to use only quantitative analysis
-  enabled: true
-
-  # Maximum monthly spending limit in USD for Claude API
-  monthly_limit_usd: 50.0
-
-  # Maximum number of AI research reports to generate per day
-  # Helps spread API usage across the month
-  max_reports_per_day: 10
 
 # ==============================================================================
 # Discovery Settings

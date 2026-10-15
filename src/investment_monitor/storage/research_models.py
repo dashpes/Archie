@@ -31,33 +31,6 @@ CANDIDATE_STATUSES = (
 )
 
 
-class ResearchProfile(Base):
-    """Investment profile and preferences - singleton per system."""
-
-    __tablename__ = "research_profiles"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
-    investment_style: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    risk_tolerance: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    sector_preferences: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True
-    )  # JSON-encoded list
-    value_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
-    growth_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
-    quality_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
-    momentum_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
-    sentiment_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (UniqueConstraint("name", name="uq_research_profile_name"),)
-
-
 class StockCandidate(Base):
     """Stock candidates discovered for research."""
 
@@ -108,55 +81,6 @@ class CandidateScore(Base):
     __table_args__ = (
         UniqueConstraint("ticker", name="uq_candidate_score_ticker"),
         Index("ix_candidate_score_ticker", "ticker"),
-    )
-
-
-class ResearchReport(Base):
-    """Research reports for stock candidates."""
-
-    __tablename__ = "research_reports"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    bull_case: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    bear_case: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    thesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    recommendation: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    target_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (Index("ix_research_report_ticker", "ticker"),)
-
-
-class PerformanceTracker(Base):
-    """Track performance of stock candidates over time."""
-
-    __tablename__ = "performance_trackers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
-    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
-    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
-    return_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    return_60d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    return_90d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    current_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint("ticker", "entry_date", name="uq_performance_ticker_date"),
-        Index("ix_performance_tracker_ticker", "ticker"),
     )
 
 

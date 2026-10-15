@@ -1,6 +1,5 @@
 """Tests for simulation result storage."""
 
-import json
 from datetime import date, datetime
 
 import pytest

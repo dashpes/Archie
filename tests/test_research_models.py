@@ -1,6 +1,6 @@
 """Tests for research database models."""
 
-from datetime import date, datetime
+from datetime import date
 
 import pytest
 from sqlalchemy import create_engine
@@ -12,9 +12,6 @@ from investment_monitor.storage.research_models import (
     CANDIDATE_STATUSES,
     CandidateScore,
     CongressionalTrade,
-    PerformanceTracker,
-    ResearchProfile,
-    ResearchReport,
     StockCandidate,
 )
 
@@ -26,66 +23,6 @@ def db_session():
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
-
-
-class TestResearchProfile:
-    """Tests for ResearchProfile model."""
-
-    def test_create_profile(self, db_session):
-        """Test creating a research profile."""
-        profile = ResearchProfile(
-            name="default",
-            investment_style="value",
-            risk_tolerance="moderate",
-            sector_preferences='["technology", "healthcare"]',
-            value_weight=0.3,
-            growth_weight=0.2,
-            quality_weight=0.2,
-            momentum_weight=0.15,
-            sentiment_weight=0.15,
-        )
-        db_session.add(profile)
-        db_session.commit()
-
-        retrieved = db_session.query(ResearchProfile).filter_by(name="default").first()
-        assert retrieved is not None
-        assert retrieved.investment_style == "value"
-        assert retrieved.risk_tolerance == "moderate"
-        assert retrieved.value_weight == 0.3
-
-    def test_profile_defaults(self, db_session):
-        """Test profile default values."""
-        profile = ResearchProfile(name="test_defaults")
-        db_session.add(profile)
-        db_session.commit()
-
-        retrieved = db_session.query(ResearchProfile).filter_by(name="test_defaults").first()
-        assert retrieved.value_weight == 0.2
-        assert retrieved.growth_weight == 0.2
-        assert retrieved.quality_weight == 0.2
-        assert retrieved.momentum_weight == 0.2
-        assert retrieved.sentiment_weight == 0.2
-
-    def test_profile_unique_name_constraint(self, db_session):
-        """Test that profile name must be unique."""
-        profile1 = ResearchProfile(name="unique_test")
-        db_session.add(profile1)
-        db_session.commit()
-
-        profile2 = ResearchProfile(name="unique_test")
-        db_session.add(profile2)
-        with pytest.raises(IntegrityError):
-            db_session.commit()
-
-    def test_profile_timestamps(self, db_session):
-        """Test that timestamps are set automatically."""
-        profile = ResearchProfile(name="timestamp_test")
-        db_session.add(profile)
-        db_session.commit()
-
-        retrieved = db_session.query(ResearchProfile).filter_by(name="timestamp_test").first()
-        assert retrieved.created_at is not None
-        assert retrieved.updated_at is not None
 
 
 class TestStockCandidate:
@@ -197,103 +134,6 @@ class TestCandidateScore:
         assert retrieved.quality_score == 50.0
 
 
-class TestResearchReport:
-    """Tests for ResearchReport model."""
-
-    def test_create_report(self, db_session):
-        """Test creating a research report."""
-        report = ResearchReport(
-            ticker="AAPL",
-            summary="Apple is a strong buy based on services growth",
-            bull_case="Services revenue continues to grow at 20%+ YoY",
-            bear_case="Hardware sales may slow in economic downturn",
-            thesis="Long-term hold based on ecosystem strength",
-            recommendation="BUY",
-            target_price=200.0,
-        )
-        db_session.add(report)
-        db_session.commit()
-
-        retrieved = db_session.query(ResearchReport).filter_by(ticker="AAPL").first()
-        assert retrieved is not None
-        assert retrieved.recommendation == "BUY"
-        assert retrieved.target_price == 200.0
-
-    def test_multiple_reports_same_ticker(self, db_session):
-        """Test that multiple reports for same ticker are allowed."""
-        report1 = ResearchReport(ticker="META", recommendation="HOLD")
-        report2 = ResearchReport(ticker="META", recommendation="BUY")
-        db_session.add(report1)
-        db_session.add(report2)
-        db_session.commit()
-
-        reports = db_session.query(ResearchReport).filter_by(ticker="META").all()
-        assert len(reports) == 2
-
-
-class TestPerformanceTracker:
-    """Tests for PerformanceTracker model."""
-
-    def test_create_tracker(self, db_session):
-        """Test creating a performance tracker."""
-        tracker = PerformanceTracker(
-            ticker="AAPL",
-            entry_date=date(2026, 1, 1),
-            entry_price=175.0,
-            return_30d=5.5,
-            return_60d=8.2,
-            return_90d=12.0,
-            current_price=196.0,
-        )
-        db_session.add(tracker)
-        db_session.commit()
-
-        retrieved = db_session.query(PerformanceTracker).filter_by(ticker="AAPL").first()
-        assert retrieved is not None
-        assert retrieved.entry_price == 175.0
-        assert retrieved.return_30d == 5.5
-        assert retrieved.return_60d == 8.2
-        assert retrieved.return_90d == 12.0
-
-    def test_tracker_unique_ticker_date_constraint(self, db_session):
-        """Test that ticker + entry_date must be unique."""
-        tracker1 = PerformanceTracker(
-            ticker="MSFT",
-            entry_date=date(2026, 1, 15),
-            entry_price=400.0,
-        )
-        db_session.add(tracker1)
-        db_session.commit()
-
-        tracker2 = PerformanceTracker(
-            ticker="MSFT",
-            entry_date=date(2026, 1, 15),
-            entry_price=405.0,
-        )
-        db_session.add(tracker2)
-        with pytest.raises(IntegrityError):
-            db_session.commit()
-
-    def test_tracker_same_ticker_different_dates(self, db_session):
-        """Test that same ticker with different dates is allowed."""
-        tracker1 = PerformanceTracker(
-            ticker="GOOGL",
-            entry_date=date(2026, 1, 1),
-            entry_price=140.0,
-        )
-        tracker2 = PerformanceTracker(
-            ticker="GOOGL",
-            entry_date=date(2026, 2, 1),
-            entry_price=145.0,
-        )
-        db_session.add(tracker1)
-        db_session.add(tracker2)
-        db_session.commit()
-
-        trackers = db_session.query(PerformanceTracker).filter_by(ticker="GOOGL").all()
-        assert len(trackers) == 2
-
-
 class TestCongressionalTrade:
     """Tests for CongressionalTrade model."""
 
@@ -394,34 +234,3 @@ class TestCongressionalTrade:
         assert len(trades) == 2
 
 
-class TestModelTimestamps:
-    """Test timestamp behavior across all models."""
-
-    def test_all_models_have_created_at(self, db_session):
-        """Test that all models get created_at timestamp."""
-        # Create one of each model
-        profile = ResearchProfile(name="ts_test")
-        candidate = StockCandidate(ticker="TSTEST")
-        score = CandidateScore(ticker="SCTEST")
-        report = ResearchReport(ticker="RPTEST")
-        tracker = PerformanceTracker(
-            ticker="PKTEST", entry_date=date(2026, 1, 1), entry_price=100.0
-        )
-        trade = CongressionalTrade(
-            ticker="CTTEST",
-            politician="Test Person",
-            trade_type="buy",
-            amount_range="$1,001-$15,000",
-            trade_date=date(2026, 1, 1),
-        )
-
-        db_session.add_all([profile, candidate, score, report, tracker, trade])
-        db_session.commit()
-
-        # Verify all have created_at
-        assert db_session.query(ResearchProfile).first().created_at is not None
-        assert db_session.query(StockCandidate).first().created_at is not None
-        assert db_session.query(CandidateScore).first().created_at is not None
-        assert db_session.query(ResearchReport).first().created_at is not None
-        assert db_session.query(PerformanceTracker).first().created_at is not None
-        assert db_session.query(CongressionalTrade).first().created_at is not None

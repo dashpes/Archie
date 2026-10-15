@@ -14,7 +14,6 @@ vision was missing (see the insight-engine-gap analysis).
 from __future__ import annotations
 
 import asyncio
-from datetime import date
 
 from loguru import logger
 

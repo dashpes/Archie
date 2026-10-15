@@ -2,22 +2,12 @@
 
 This module provides CLI commands for stock research operations including:
 - Discovery pipeline execution
-- Single ticker analysis
-- Research queue management
-- Viewing top candidates and reports
-- Managing research profiles
+- Viewing top candidates
 - Monte Carlo simulation for risk analysis
 
 Usage:
     investment-research discover [--dry-run]
-    investment-research analyze TICKER [--no-report]
-    investment-research queue list
-    investment-research queue add TICKER [--priority N]
-    investment-research queue remove TICKER
-    investment-research queue process [--max N]
     investment-research top [--limit N] [--min-score N]
-    investment-research report TICKER
-    investment-research profile [--show]
     investment-research simulate --ticker TICKER [--force] [--horizons 30,90,252]
     investment-research simulate --tickers AAPL,MSFT,GOOGL
     investment-research simulate --auto
@@ -38,14 +28,10 @@ import yfinance as yf
 from investment_monitor.config import get_settings
 from investment_monitor.models import ResearchConfig
 from investment_monitor.research.discovery import DiscoveryPipeline
-from investment_monitor.research.orchestrator import ResearchOrchestrator
-from investment_monitor.research.queue import ResearchQueue
 from investment_monitor.simulation.analyzer import MonteCarloAnalyzer
 from investment_monitor.simulation.models import SimulationConfig
 from investment_monitor.storage import (
     get_high_scoring_candidates,
-    get_latest_report,
-    get_or_create_default_profile,
     get_session,
     get_simulation_results,
     get_top_candidates,
@@ -53,19 +39,11 @@ from investment_monitor.storage import (
     save_simulation_result,
 )
 
-# Create the main app and queue subcommand
 app = typer.Typer(
     name="investment-research",
     help="Stock research and discovery CLI",
     no_args_is_help=True,
 )
-
-queue_app = typer.Typer(
-    name="queue",
-    help="Research queue management commands",
-    no_args_is_help=True,
-)
-app.add_typer(queue_app, name="queue")
 
 
 def _load_research_config(config_dir: Path) -> ResearchConfig:
@@ -147,220 +125,6 @@ def discover(
 
 
 @app.command()
-def analyze(
-    ticker: str = typer.Argument(..., help="Stock ticker symbol to analyze"),
-    no_report: bool = typer.Option(
-        False,
-        "--no-report",
-        help="Skip generating full research report",
-    ),
-) -> None:
-    """Analyze a single ticker with deep research.
-
-    Performs comprehensive analysis including:
-    - Fetching fundamentals
-    - Gathering news
-    - Checking congressional trades
-    - Generating AI research report (unless --no-report)
-    """
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-        research_config = _load_research_config(settings.config_dir)
-
-        ticker = ticker.upper()
-        typer.echo(f"Analyzing {ticker}...")
-
-        with get_session() as session:
-            orchestrator = ResearchOrchestrator(
-                session=session,
-                config=settings,
-                research_config=research_config,
-            )
-
-            result = asyncio.run(orchestrator.research_ticker(ticker))
-
-            if result.success:
-                typer.echo(f"\n--- Research Complete for {ticker} ---")
-                typer.echo(f"Duration: {result.duration:.1f}s")
-
-                if result.report and not no_report:
-                    report = result.report
-                    typer.echo(f"\nRecommendation: {report.recommendation or 'N/A'}")
-                    if report.target_price:
-                        typer.echo(f"Target Price: ${report.target_price:.2f}")
-                    if report.summary:
-                        typer.echo(f"\nSummary:\n{report.summary}")
-                else:
-                    typer.echo("\nResearch data collected successfully.")
-            else:
-                typer.echo(f"\nResearch failed for {ticker}: {result.error}", err=True)
-                raise typer.Exit(code=1)
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@queue_app.command("list")
-def queue_list(
-    limit: int = typer.Option(
-        50,
-        "--limit",
-        "-l",
-        help="Maximum number of queue items to show",
-    ),
-) -> None:
-    """Show items in the research queue."""
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-
-        with get_session() as session:
-            queue = ResearchQueue(session)
-            items = queue.get_queue(limit=limit)
-
-            if not items:
-                typer.echo("Research queue is empty.")
-                return
-
-            typer.echo(f"\n--- Research Queue ({len(items)} items) ---")
-            typer.echo(f"{'#':<4} {'Ticker':<10} {'Priority':<10}")
-            typer.echo("-" * 30)
-
-            for i, candidate in enumerate(items, 1):
-                priority = candidate.composite_score or 0
-                typer.echo(f"{i:<4} {candidate.ticker:<10} {priority:<10.1f}")
-
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@queue_app.command("add")
-def queue_add(
-    ticker: str = typer.Argument(..., help="Stock ticker symbol to add"),
-    priority: int = typer.Option(
-        0,
-        "--priority",
-        "-p",
-        help="Priority score (higher = processed first)",
-    ),
-) -> None:
-    """Add a ticker to the research queue."""
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-
-        ticker = ticker.upper()
-
-        with get_session() as session:
-            queue = ResearchQueue(session)
-            success = queue.add_to_queue(ticker, priority=priority)
-
-            if success:
-                typer.echo(f"Added {ticker} to research queue with priority {priority}")
-            else:
-                typer.echo(f"Failed to add {ticker} to queue", err=True)
-                raise typer.Exit(code=1)
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@queue_app.command("remove")
-def queue_remove(
-    ticker: str = typer.Argument(..., help="Stock ticker symbol to remove"),
-) -> None:
-    """Remove a ticker from the research queue."""
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-
-        ticker = ticker.upper()
-
-        with get_session() as session:
-            queue = ResearchQueue(session)
-            success = queue.remove_from_queue(ticker)
-
-            if success:
-                typer.echo(f"Removed {ticker} from research queue")
-            else:
-                typer.echo(
-                    f"Failed to remove {ticker} from queue (not found or not in queue)",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@queue_app.command("process")
-def queue_process(
-    max_items: int = typer.Option(
-        5,
-        "--max",
-        "-m",
-        help="Maximum number of items to process",
-    ),
-) -> None:
-    """Process items from the research queue.
-
-    Processes queue items in priority order, generating research reports
-    for each ticker.
-    """
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-        research_config = _load_research_config(settings.config_dir)
-
-        typer.echo(f"Processing up to {max_items} items from research queue...")
-
-        with get_session() as session:
-            orchestrator = ResearchOrchestrator(
-                session=session,
-                config=settings,
-                research_config=research_config,
-            )
-
-            results = asyncio.run(orchestrator.process_queue(max_items=max_items))
-
-            if not results:
-                typer.echo("Research queue is empty.")
-                return
-
-            successful = sum(1 for r in results if r.success)
-            failed = len(results) - successful
-
-            typer.echo(f"\n--- Queue Processing Complete ---")
-            typer.echo(f"Processed: {len(results)} items")
-            typer.echo(f"Successful: {successful}")
-            typer.echo(f"Failed: {failed}")
-
-            if results:
-                typer.echo(f"\n{'Ticker':<10} {'Status':<10} {'Duration':<10}")
-                typer.echo("-" * 35)
-                for result in results:
-                    status = "OK" if result.success else "FAILED"
-                    typer.echo(
-                        f"{result.ticker:<10} {status:<10} {result.duration:.1f}s"
-                    )
-
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@app.command()
 def top(
     limit: int = typer.Option(
         20,
@@ -402,101 +166,6 @@ def top(
                 typer.echo(
                     f"{i:<4} {candidate.ticker:<10} {score:<10.1f} {candidate.status:<12}"
                 )
-
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def report(
-    ticker: str = typer.Argument(..., help="Stock ticker symbol"),
-) -> None:
-    """Show the latest research report for a ticker."""
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-
-        ticker = ticker.upper()
-
-        with get_session() as session:
-            research_report = get_latest_report(session, ticker)
-
-            if not research_report:
-                typer.echo(f"No report found for {ticker}", err=True)
-                raise typer.Exit(code=1)
-
-            typer.echo(f"\n{'='*60}")
-            typer.echo(f"Research Report: {ticker}")
-            typer.echo(f"{'='*60}")
-
-            if research_report.created_at:
-                typer.echo(
-                    f"Generated: {research_report.created_at.strftime('%Y-%m-%d %H:%M')}"
-                )
-
-            if research_report.recommendation:
-                typer.echo(f"\nRecommendation: {research_report.recommendation}")
-
-            if research_report.target_price:
-                typer.echo(f"Target Price: ${research_report.target_price:.2f}")
-
-            if research_report.summary:
-                typer.echo(f"\n--- Summary ---\n{research_report.summary}")
-
-            if research_report.bull_case:
-                typer.echo(f"\n--- Bull Case ---\n{research_report.bull_case}")
-
-            if research_report.bear_case:
-                typer.echo(f"\n--- Bear Case ---\n{research_report.bear_case}")
-
-            if research_report.thesis:
-                typer.echo(f"\n--- Investment Thesis ---\n{research_report.thesis}")
-
-            typer.echo(f"\n{'='*60}")
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def profile(
-    show: bool = typer.Option(
-        False,
-        "--show",
-        "-s",
-        help="Show current research profile",
-    ),
-) -> None:
-    """Show or manage research profile settings.
-
-    The research profile contains scoring weights and preferences
-    that influence how candidates are evaluated.
-    """
-    try:
-        settings = get_settings()
-        init_db(settings.db_path)
-
-        with get_session() as session:
-            research_profile = get_or_create_default_profile(session)
-
-            typer.echo(f"\n--- Research Profile: {research_profile.name} ---")
-
-            if research_profile.investment_style:
-                typer.echo(f"Investment Style: {research_profile.investment_style}")
-
-            if research_profile.risk_tolerance:
-                typer.echo(f"Risk Tolerance: {research_profile.risk_tolerance}")
-
-            typer.echo("\nScoring Weights:")
-            typer.echo(f"  Value:     {research_profile.value_weight:.1%}")
-            typer.echo(f"  Growth:    {research_profile.growth_weight:.1%}")
-            typer.echo(f"  Quality:   {research_profile.quality_weight:.1%}")
-            typer.echo(f"  Momentum:  {research_profile.momentum_weight:.1%}")
-            typer.echo(f"  Sentiment: {research_profile.sentiment_weight:.1%}")
 
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
@@ -625,7 +294,7 @@ def simulate(
 
                 # Save results
                 with get_session() as session:
-                    result = save_simulation_result(session, output)
+                    save_simulation_result(session, output)
                     session.commit()
 
                 # Display summary
@@ -648,7 +317,7 @@ def simulate(
                 failed += 1
 
         typer.echo("")
-        typer.echo(f"--- Simulation Complete ---")
+        typer.echo("--- Simulation Complete ---")
         typer.echo(f"Successful: {successful}")
         typer.echo(f"Failed: {failed}")
 

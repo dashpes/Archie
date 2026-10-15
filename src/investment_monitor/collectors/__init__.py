@@ -2,8 +2,6 @@
 
 from .base import BaseCollector, CollectorResult
 from .congress import CongressTradesCollector
-from .earnings import EarningsCollector
-from .etf_holdings import ETFHoldingsCollector
 from .fundamentals import FundamentalsCollector, FundamentalsData
 from .insider import InsiderCollector
 from .material_events import MaterialEventsCollector

@@ -38,7 +38,6 @@ class UniverseConfig(BaseModel):
 
     include_sp500: bool = True
     include_nasdaq100: bool = True
-    etf_tickers: list[str] = Field(default_factory=list)  # e.g., ["QQQ", "SPY", "VTI"]
     min_market_cap: int = Field(default=1_000_000_000, ge=0)  # $1B minimum
     excluded_sectors: list[str] = Field(default_factory=list)
     excluded_tickers: list[str] = Field(default_factory=list)
@@ -56,18 +55,6 @@ class ResearchThresholds(BaseModel):
     auto_reject_score: float = Field(default=30.0, ge=0, le=100)
 
 
-class ClaudeBudgetConfig(BaseModel):
-    """Configuration for Claude API usage limits.
-
-    Controls spending limits and rate limiting for AI-powered
-    research report generation.
-    """
-
-    enabled: bool = True
-    monthly_limit_usd: float = Field(default=50.0, ge=0)
-    max_reports_per_day: int = Field(default=10, ge=1)
-
-
 class ResearchConfig(BaseModel):
     """Main research configuration containing all research-related settings.
 
@@ -75,13 +62,11 @@ class ResearchConfig(BaseModel):
     - Scoring weights for investment analysis
     - Universe of stocks to screen
     - Thresholds for automated decisions
-    - Claude API budget limits
     """
 
     scoring_weights: ScoringWeights = Field(default_factory=ScoringWeights)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
     thresholds: ResearchThresholds = Field(default_factory=ResearchThresholds)
-    claude_budget: ClaudeBudgetConfig = Field(default_factory=ClaudeBudgetConfig)
     discovery_batch_size: int = Field(default=50, ge=1, le=500)
 
     @classmethod

@@ -24,7 +24,6 @@ from investment_monitor.storage import (
     ThesisStatus,
     get_last_exited_thesis,
     get_latest_price,
-    get_latest_report,
     get_thesis,
     get_top_candidates,
     save_thesis,
@@ -48,8 +47,7 @@ def _eligible_candidates(session: "Session", config: "RoboConfig") -> list:
         return candidates
     out = []
     for cand in candidates:
-        report = get_latest_report(session, cand.ticker)
-        rec = (report.recommendation if report else "") or ""
+        rec = ""  # research reports were removed; the thesis store goes next
         if rec.lower() in ("buy", "strong_buy"):
             out.append(cand)
     return out

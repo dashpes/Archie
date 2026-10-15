@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import AlertSent, EarningsDate, ETFHolding, InsiderTransaction, NewsItem, Price
+from .models import AlertSent, EarningsDate, InsiderTransaction, NewsItem, Price
 
 
 # Price operations
@@ -190,32 +190,3 @@ def get_upcoming_earnings(
 
 
 # ETF operations
-def save_etf_holdings(session: Session, holdings: list[ETFHolding]) -> int:
-    """Save ETF holdings, returning count saved."""
-    session.add_all(holdings)
-    session.flush()
-    return len(holdings)
-
-
-def get_etf_holdings(
-    session: Session, etf_ticker: str, as_of_date: date | None = None
-) -> list[ETFHolding]:
-    """Get ETF holdings for a given date (or latest)."""
-    if as_of_date is None:
-        # Get most recent date
-        stmt = (
-            select(ETFHolding.as_of_date)
-            .where(ETFHolding.etf_ticker == etf_ticker)
-            .order_by(ETFHolding.as_of_date.desc())
-            .limit(1)
-        )
-        as_of_date = session.scalar(stmt)
-        if as_of_date is None:
-            return []
-
-    stmt = (
-        select(ETFHolding)
-        .where(ETFHolding.etf_ticker == etf_ticker, ETFHolding.as_of_date == as_of_date)
-        .order_by(ETFHolding.weight_pct.desc())
-    )
-    return list(session.scalars(stmt))

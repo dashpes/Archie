@@ -126,23 +126,3 @@ class EarningsDate(Base):
     __table_args__ = (UniqueConstraint("ticker", "earnings_date", name="uq_earnings_ticker_date"),)
 
 
-class ETFHolding(Base):
-    """ETF holdings data."""
-
-    __tablename__ = "etf_holdings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    etf_ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
-    holding_ticker: Mapped[str] = mapped_column(String(10), nullable=False)
-    shares: Mapped[float] = mapped_column(Float, nullable=True)
-    weight_pct: Mapped[float] = mapped_column(Float, nullable=True)
-    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "etf_ticker", "holding_ticker", "as_of_date", name="uq_etf_holding_date"
-        ),
-    )

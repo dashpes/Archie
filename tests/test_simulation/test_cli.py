@@ -3,7 +3,6 @@
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from investment_monitor.research_cli import app

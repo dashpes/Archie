@@ -10,8 +10,7 @@ from investment_monitor.robo.rebalance import RebalanceResult
 
 def _settings(*, to="+15551234567", paper=False, smtp_host="", email_to=""):
     return SimpleNamespace(
-        imessage_to=to,
-        imessage_notify_paper=paper,
+        notify_paper_trades=paper,
         db_path="data/portfolio.db",
         smtp_host=smtp_host,
         smtp_port=587,
@@ -182,14 +181,6 @@ def test_channel_prefers_email_when_configured():
 
     settings = _settings(to="+15551234567", smtp_host="smtp.gmail.com", email_to="me@x.com")
     assert isinstance(notify._channel(settings), EmailChannel)
-
-
-def test_channel_falls_back_to_imessage_without_email():
-    from investment_monitor.notifications.imessage import IMessageChannel
-
-    # smtp_host set but no recipient -> email inactive -> iMessage used.
-    settings = _settings(to="+15551234567", smtp_host="smtp.gmail.com", email_to="")
-    assert isinstance(notify._channel(settings), IMessageChannel)
 
 
 def test_channel_none_when_nothing_configured():

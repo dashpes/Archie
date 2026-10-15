@@ -252,45 +252,26 @@ class TestCollectNASDAQ100:
 # ============================================================================
 
 
-class TestCollectETFHoldings:
-    """Tests for ETF holdings collection."""
-
-    async def test_collect_etf_holdings_success(self, collector):
-        """Should collect ETF holdings using yfinance."""
-        mock_ticker = MagicMock()
-        mock_funds_data = MagicMock()
-        mock_funds_data.top_holdings = MagicMock()
-        mock_funds_data.top_holdings.index = ["AAPL", "MSFT", "GOOGL"]
-        mock_ticker.funds_data = mock_funds_data
-
-        with patch('yfinance.Ticker', return_value=mock_ticker):
-            holdings = await collector.collect_etf_holdings("QQQ")
-
-        assert "AAPL" in holdings
-        assert "MSFT" in holdings
-        assert "GOOGL" in holdings
-
-    async def test_collect_etf_holdings_empty(self, collector):
-        """Should handle ETFs with no available holdings data."""
-        mock_ticker = MagicMock()
-        mock_ticker.funds_data = None
-
-        with patch('yfinance.Ticker', return_value=mock_ticker):
-            holdings = await collector.collect_etf_holdings("XYZ")
-
-        assert holdings == []
-
-    async def test_collect_etf_holdings_exception(self, collector):
-        """Should handle exceptions gracefully."""
-        with patch('yfinance.Ticker', side_effect=Exception("API Error")):
-            holdings = await collector.collect_etf_holdings("QQQ")
-
-        assert holdings == []
-
-
 # ============================================================================
 # Deduplication Tests
 # ============================================================================
+
+
+class TestCollectIndices:
+    """collect() gathers S&P 500 and Nasdaq-100 membership; ETF lists are gone."""
+
+    @pytest.mark.asyncio
+    async def test_collect_both_indices(self, collector):
+        with patch.object(collector, "collect_sp500", return_value=["AAPL", "MSFT"]):
+            with patch.object(collector, "collect_nasdaq100", return_value=["AMZN", "NVDA"]):
+                with patch.object(collector, "_save_candidates", return_value=(2, [])):
+                    result = await collector.collect([])
+        assert isinstance(result, CollectorResult)
+        assert result.records_collected == 4
+
+    @pytest.mark.asyncio
+    async def test_collect_single_is_noop(self, collector):
+        assert await collector.collect_single("SPY") == 0
 
 
 class TestDeduplication:
@@ -424,53 +405,6 @@ class TestSaveCandidates:
 class TestCollect:
     """Tests for the main collect method."""
 
-    async def test_collect_from_all_sources(self, collector):
-        """Should collect from all configured sources."""
-        with patch.object(
-            collector, 'collect_sp500',
-            return_value=["AAPL", "MSFT"]
-        ):
-            with patch.object(
-                collector, 'collect_nasdaq100',
-                return_value=["AMZN", "NVDA"]
-            ):
-                with patch.object(
-                    collector, 'collect_etf_holdings',
-                    return_value=["TSLA"]
-                ):
-                    with patch.object(
-                        collector, '_save_candidates',
-                        return_value=(2, [])
-                    ):
-                        result = await collector.collect(["QQQ"])
-
-        assert isinstance(result, CollectorResult)
-        assert result.collector_name == "universe"
-        # 2 records from each source (sp500, nasdaq100, etf)
-        assert result.records_collected == 6
-
-    async def test_collect_skips_disabled_indices(self, collector_no_indices):
-        """Should skip disabled index collections."""
-        with patch.object(
-            collector_no_indices, 'collect_sp500'
-        ) as mock_sp500:
-            with patch.object(
-                collector_no_indices, 'collect_nasdaq100'
-            ) as mock_nasdaq:
-                with patch.object(
-                    collector_no_indices, 'collect_etf_holdings',
-                    return_value=["AAPL"]
-                ):
-                    with patch.object(
-                        collector_no_indices, '_save_candidates',
-                        return_value=(1, [])
-                    ):
-                        result = await collector_no_indices.collect(["SPY"])
-
-        mock_sp500.assert_not_called()
-        mock_nasdaq.assert_not_called()
-        assert result.records_collected == 1
-
     async def test_collect_handles_sp500_error(self, collector):
         """Should continue despite S&P 500 collection error."""
         with patch.object(
@@ -527,45 +461,9 @@ class TestCollect:
         assert result.finished_at is not None
         assert result.finished_at >= result.started_at
 
-    async def test_collect_empty_etf_list(self, collector_no_indices):
-        """Should handle empty ETF ticker list."""
-        result = await collector_no_indices.collect([])
-
-        assert result.collector_name == "universe"
-        assert result.records_collected == 0
-        assert result.success is True
-
-
 # ============================================================================
 # Collect Single Tests
 # ============================================================================
-
-
-class TestCollectSingle:
-    """Tests for the collect_single method."""
-
-    async def test_collect_single_etf(self, collector):
-        """Should collect holdings from a single ETF."""
-        with patch.object(
-            collector, 'collect_etf_holdings',
-            return_value=["AAPL", "MSFT"]
-        ):
-            with patch.object(
-                collector, '_save_candidates',
-                return_value=(2, [])
-            ):
-                records = await collector.collect_single("QQQ")
-
-        assert records == 2
-
-    async def test_collect_single_error(self, collector):
-        """Should raise exception on error."""
-        with patch.object(
-            collector, 'collect_etf_holdings',
-            side_effect=Exception("API Error")
-        ):
-            with pytest.raises(Exception):
-                await collector.collect_single("QQQ")
 
 
 # ============================================================================

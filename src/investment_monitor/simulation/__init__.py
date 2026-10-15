@@ -10,7 +10,6 @@ from .models import (
     SimulationConfig,
     SimulationOutput,
 )
-from .report_formatter import SimulationReportFormatter
 from .sensitivity import SensitivityAnalyzer
 
 __all__ = [

@@ -1,6 +1,6 @@
 """Tests for MonteCarloAnalyzer - the main orchestrator."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest

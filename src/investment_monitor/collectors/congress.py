@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from .base import BaseCollector, CollectorResult
 from .insider import is_junk_ticker
-from ..storage import CongressionalTrade, save_congressional_trade
+from ..storage import CongressionalTrade
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -24,12 +24,11 @@ class CongressTradesCollector(BaseCollector):
     """
     Collector for congressional stock trading disclosures.
 
-    Fetches trade data from:
-    - House Stock Watcher (public S3 data)
-    - Senate Stock Watcher (public S3 data)
+    Source is the official Senate eFD system (see ``fetch_senate_efd_trades``).
+    House PTRs are scanned PDFs and remain unsourced.
 
-    Saves discovered trades as CongressionalTrade records, filtering by
-    provided ticker list and deduplicating based on the unique constraint.
+    Saves discovered trades as CongressionalTrade records, deduplicating on the
+    unique constraint.
     """
 
     name = "congress_trades"
@@ -38,66 +37,11 @@ class CongressTradesCollector(BaseCollector):
     max_retries = 3
     retry_delay = 2.0
 
-    # Public API URLs (no auth required)
-    HOUSE_URL = (
-        "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com"
-        "/data/all_transactions.json"
-    )
-    SENATE_URL = (
-        "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com"
-        "/aggregate/all_transactions.json"
-    )
-
     # User agent for requests
     USER_AGENT = "InvestmentMonitor/1.0 (Congressional Trade Tracker)"
 
-    async def fetch_house_trades(self) -> list[dict]:
-        """
-        Fetch House trades from the public S3 API.
-
-        Returns:
-            List of raw trade dictionaries from House Stock Watcher
-        """
-
-        async def _fetch() -> list[dict]:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    self.HOUSE_URL,
-                    headers={"User-Agent": self.USER_AGENT},
-                    timeout=60.0,
-                )
-                response.raise_for_status()
-                data = response.json()
-                logger.info(f"Fetched {len(data)} House trades from API")
-                return data
-
-        return await self._retry_with_backoff(_fetch)
-
-    async def fetch_senate_trades(self) -> list[dict]:
-        """
-        Fetch Senate trades from the public S3 API.
-
-        Returns:
-            List of raw trade dictionaries from Senate Stock Watcher
-        """
-
-        async def _fetch() -> list[dict]:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    self.SENATE_URL,
-                    headers={"User-Agent": self.USER_AGENT},
-                    timeout=60.0,
-                )
-                response.raise_for_status()
-                data = response.json()
-                logger.info(f"Fetched {len(data)} Senate trades from API")
-                return data
-
-        return await self._retry_with_backoff(_fetch)
-
     # ------------------------------------------------------------------ #
-    # Senate eFD — the OFFICIAL live source (the stock-watcher S3 mirrors
-    # above went dark; kept only for reference/tests until House is re-sourced).
+    # Senate eFD — the OFFICIAL live source (the House side has no machine-readable feed).
     # ------------------------------------------------------------------ #
     EFD_BASE = "https://efdsearch.senate.gov"
     EFD_HOME = "https://efdsearch.senate.gov/search/home/"
@@ -463,98 +407,43 @@ class CongressTradesCollector(BaseCollector):
         )
 
     async def collect(self, tickers: list[str]) -> CollectorResult:
-        """
-        Collect congressional trades for given tickers.
+        """Collect recent Senate trades for the given tickers only.
 
-        Fetches all trades from both House and Senate APIs, then filters
-        to only save trades for the specified tickers.
-
-        Args:
-            tickers: List of ticker symbols to collect trades for
-
-        Returns:
-            CollectorResult with success status, records count, and any errors
+        Same source and dedup as ``collect_all``, filtered to ``tickers``. Use
+        ``collect_all`` for the market-wide ingestion the insight engine needs.
         """
         started_at = datetime.now()
-        records = 0
         errors: list[str] = []
-
-        # Normalize tickers to uppercase for matching
+        records = 0
         ticker_set = {t.upper() for t in tickers}
-
-        # Fetch House trades
+        seen = self._existing_trade_keys()
         try:
-            house_trades = await self.fetch_house_trades()
-            house_count = 0
-
-            for raw in house_trades:
-                trade = self.parse_trade(raw, "House")
-                if trade and trade.ticker in ticker_set:
-                    if not self._trade_exists(trade):
-                        save_congressional_trade(self.session, trade)
-                        house_count += 1
-
-            records += house_count
-            logger.debug(f"{self.name}: Saved {house_count} House trades")
-
-        except Exception as e:
-            error_msg = f"House trades fetch failed: {str(e)}"
-            errors.append(error_msg)
-            logger.error(f"{self.name}: {error_msg}")
-
-        # Fetch Senate trades
-        try:
-            senate_trades = await self.fetch_senate_trades()
-            senate_count = 0
-
-            for raw in senate_trades:
+            raw_trades = await self.fetch_senate_efd_trades(days_back=7)
+            for raw in raw_trades:
                 trade = self.parse_trade(raw, "Senate")
-                if trade and trade.ticker in ticker_set:
-                    if not self._trade_exists(trade):
-                        save_congressional_trade(self.session, trade)
-                        senate_count += 1
-
-            records += senate_count
-            logger.debug(f"{self.name}: Saved {senate_count} Senate trades")
-
-        except Exception as e:
-            error_msg = f"Senate trades fetch failed: {str(e)}"
-            errors.append(error_msg)
-            logger.error(f"{self.name}: {error_msg}")
-
-        # Commit all changes
-        try:
+                if trade is None or trade.ticker not in ticker_set:
+                    continue
+                key = self._trade_key(trade)
+                if key in seen:
+                    continue
+                seen.add(key)
+                self.session.add(trade)
+                records += 1
             self.session.commit()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.session.rollback()
-            error_msg = f"Failed to commit: {str(e)}"
-            errors.append(error_msg)
-            logger.error(f"{self.name}: {error_msg}")
-
-        finished_at = datetime.now()
-
+            errors.append(f"Senate eFD fetch failed: {e}")
+            logger.error(f"{self.name}: {errors[-1]}")
         return CollectorResult(
             collector_name=self.name,
-            success=len(errors) == 0,
+            success=not errors,
             records_collected=records,
             errors=errors,
             started_at=started_at,
-            finished_at=finished_at,
+            finished_at=datetime.now(),
         )
 
     async def collect_single(self, ticker: str) -> int:
-        """
-        Collect trades for a single ticker.
-
-        This is a convenience method that fetches all trades and filters
-        to the specified ticker. Note that this still fetches all trades
-        from both APIs since they don't support filtering by ticker.
-
-        Args:
-            ticker: Ticker symbol to collect trades for
-
-        Returns:
-            Number of records saved
-        """
+        """Collect trades for one ticker (same fetch as ``collect``)."""
         result = await self.collect([ticker])
         return result.records_collected

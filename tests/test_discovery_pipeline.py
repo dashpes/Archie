@@ -3,16 +3,13 @@
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from investment_monitor.analysis import ResearchScorer
 from investment_monitor.collectors import (
     CollectorResult,
-    FundamentalsCollector,
     FundamentalsData,
-    UniverseCollector,
 )
 from investment_monitor.config import Settings
 from investment_monitor.models import ResearchConfig, ScoringWeights
