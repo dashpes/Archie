@@ -669,18 +669,20 @@ class TestParseFeed:
     """Tests for _parse_feed method."""
 
     @patch("investment_monitor.collectors.news.feedparser.parse")
-    def test_parse_feed_success(self, mock_parse, news_collector):
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
+    def test_parse_feed_success(self, _fetch, mock_parse, news_collector):
         """Should parse feed entries successfully."""
         mock_entry = MockFeedEntry(title="Test", link="https://test.com/1")
         mock_parse.return_value = MockFeed(entries=[mock_entry])
 
         entries = news_collector._parse_feed("https://test.com/rss")
 
-        mock_parse.assert_called_once_with("https://test.com/rss")
+        mock_parse.assert_called_once_with(b"<rss/>")
         assert len(entries) == 1
 
     @patch("investment_monitor.collectors.news.feedparser.parse")
-    def test_parse_feed_bozo_error_with_entries(self, mock_parse, news_collector):
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
+    def test_parse_feed_bozo_error_with_entries(self, _fetch, mock_parse, news_collector):
         """Should return entries even if bozo flag is set but entries exist."""
         mock_entry = MockFeedEntry(title="Test", link="https://test.com/1")
         mock_parse.return_value = MockFeed(
@@ -693,7 +695,8 @@ class TestParseFeed:
         assert len(entries) == 1
 
     @patch("investment_monitor.collectors.news.feedparser.parse")
-    def test_parse_feed_bozo_error_no_entries(self, mock_parse, news_collector):
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
+    def test_parse_feed_bozo_error_no_entries(self, _fetch, mock_parse, news_collector):
         """Should raise exception if bozo and no entries."""
         mock_parse.return_value = MockFeed(
             entries=[],
@@ -738,8 +741,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_per_ticker_feed(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should fetch per-ticker feed for each ticker."""
         mock_entry = MockFeedEntry(
@@ -760,8 +764,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_deduplicates_by_url(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should not save duplicate URLs within same collection."""
         # Same URL in multiple feed entries
@@ -780,8 +785,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_skips_existing_urls(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should skip URLs that already exist in database."""
         mock_entry = MockFeedEntry(title="Existing news", link="https://test.com/existing")
@@ -796,8 +802,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_handles_feed_error(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should handle feed fetch errors gracefully."""
         mock_parse.side_effect = Exception("Network error")
@@ -811,8 +818,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_matches_tickers_in_headline(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should match tickers mentioned in headlines."""
         mock_entry = MockFeedEntry(
@@ -835,8 +843,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_skips_empty_headlines(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should skip entries with empty headlines."""
         mock_entry = MockFeedEntry(title="", link="https://test.com/1")
@@ -851,8 +860,9 @@ class TestNewsCollectorCollect:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
     async def test_collect_skips_empty_urls(
-        self, mock_save, mock_exists, mock_parse, news_collector
+        self, _fetch, mock_save, mock_exists, mock_parse, news_collector
     ):
         """Should skip entries with empty URLs."""
         mock_entry = MockFeedEntry(title="News", link="")
@@ -871,7 +881,8 @@ class TestNewsCollectorSingle:
     @patch("investment_monitor.collectors.news.feedparser.parse")
     @patch("investment_monitor.collectors.news.news_exists")
     @patch("investment_monitor.collectors.news.save_news_item")
-    async def test_collect_single(self, mock_save, mock_exists, mock_parse, news_collector):
+    @patch("investment_monitor.collectors.news.NewsCollector._fetch_feed", return_value=b"<rss/>")
+    async def test_collect_single(self, _fetch, mock_save, mock_exists, mock_parse, news_collector):
         """Should collect news for a single ticker."""
         mock_entry = MockFeedEntry(title="AAPL news", link="https://test.com/1")
         mock_parse.return_value = MockFeed(entries=[mock_entry])

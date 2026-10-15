@@ -1,63 +1,91 @@
-"""Tests for the data-collection CLI."""
+"""Tests for the ``investment-data`` CLI."""
 
+from datetime import datetime
 from unittest.mock import patch
 
-from investment_monitor.cli import create_parser, main
+from typer.testing import CliRunner
+
+from investment_monitor.cli import app, data_jobs
+from investment_monitor.collectors.base import CollectorResult
+
+runner = CliRunner()
 
 
-class TestCreateParser:
-    def test_default_type_is_collect_broad(self):
-        args = create_parser().parse_args([])
-        assert args.type == "collect-broad"
-        assert args.days_back == 1
-        assert args.log_level == "INFO"
-
-    def test_all_run_types_accepted(self):
-        parser = create_parser()
-        for run_type in ["collect-broad", "insights", "prune"]:
-            assert parser.parse_args(["-t", run_type]).type == run_type
-
-    def test_prune_windows(self):
-        args = create_parser().parse_args(
-            ["-t", "prune", "--insider-days", "30", "--news-days", "7", "--findings-days", "90"]
-        )
-        assert (args.insider_days, args.news_days, args.price_days, args.findings_days) == (
-            30, 7, 0, 90,
-        )
-
-    def test_quiet_flag(self):
-        assert create_parser().parse_args(["-q"]).quiet is True
+def _result(name: str, ok: bool) -> CollectorResult:
+    now = datetime(2026, 10, 12, 8, 0)
+    return CollectorResult(
+        collector_name=name, success=ok, records_collected=0,
+        errors=[] if ok else ["down"], started_at=now, finished_at=now,
+    )
 
 
-class TestMain:
-    def test_insights_prints_findings(self, capsys):
-        findings = [{"score": 4.5, "narrative": "3 insiders bought AAPL"}]
-        with patch("investment_monitor.analysis.confluence.run_confluence", return_value=findings):
-            assert main(["-t", "insights"]) == 0
-        out = capsys.readouterr().out
-        assert "1 confluence finding" in out
-        assert "AAPL" in out
+def test_version():
+    out = runner.invoke(app, ["--version"])
+    assert out.exit_code == 0 and "investment-data" in out.output
 
-    def test_insights_reports_error(self, capsys):
-        with patch(
-            "investment_monitor.analysis.confluence.run_confluence",
-            side_effect=RuntimeError("db locked"),
-        ):
-            assert main(["-t", "insights"]) == 1
-        assert "db locked" in capsys.readouterr().err
 
-    def test_collect_broad_returns_failure_when_a_collector_fails(self, capsys, tmp_path):
-        class _Result:
-            success = False
+def test_collect_default_runs_all_sources(tmp_path):
+    with patch("investment_monitor.cli.setup_logging"), patch(
+        "investment_monitor.broad_collect.run_broad_collection_sync",
+        return_value=[_result("insider", True)],
+    ) as run:
+        out = runner.invoke(app, ["collect", "--days-back", "2"])
+    assert out.exit_code == 0, out.output
+    assert run.call_args.kwargs["sources"] == ("insider", "events", "prices", "news", "congress")
+    assert run.call_args.kwargs["days_back"] == 2
 
-            def __str__(self):
-                return "insider: failed"
 
-        with patch(
-            "investment_monitor.broad_collect.run_broad_collection_sync",
-            return_value=[_Result()],
-        ), patch("investment_monitor.logging_config.setup_logging"), patch(
-            "investment_monitor.analysis.news_processor.classify_unscored_sentiment"
-        ):
-            assert main(["-t", "collect-broad", "--days-back", "2"]) == 1
-        assert "insider: failed" in capsys.readouterr().out
+def test_collect_selects_sources_and_fails_on_a_failed_source():
+    with patch("investment_monitor.cli.setup_logging"), patch(
+        "investment_monitor.broad_collect.run_broad_collection_sync",
+        return_value=[_result("news", False)],
+    ) as run:
+        out = runner.invoke(app, ["collect", "-s", "news", "-s", "prices"])
+    assert out.exit_code == 1
+    assert run.call_args.kwargs["sources"] == ("news", "prices")
+
+
+def test_collect_rejects_unknown_source():
+    with patch("investment_monitor.cli.setup_logging"):
+        out = runner.invoke(app, ["collect", "-s", "tiktok"])
+    assert out.exit_code == 2 and "unknown source" in out.output
+
+
+def test_insights_prints_findings():
+    findings = [{"score": 4.5, "narrative": "3 insiders bought AAPL"}]
+    with patch("investment_monitor.cli.setup_logging"), patch(
+        "investment_monitor.analysis.confluence.run_confluence", return_value=findings
+    ):
+        out = runner.invoke(app, ["insights"])
+    assert out.exit_code == 0 and "AAPL" in out.output
+
+
+def test_health_reports_missing_heartbeat(tmp_path):
+    with patch("investment_monitor.cli.setup_logging"), patch(
+        "investment_monitor.scheduler.heartbeat_age_s", return_value=None
+    ):
+        out = runner.invoke(app, ["health", "data", "300"])
+    assert out.exit_code == 1 and "missing" in out.output
+
+
+def test_health_ok_when_fresh():
+    with patch("investment_monitor.cli.setup_logging"), patch(
+        "investment_monitor.scheduler.heartbeat_age_s", return_value=12.0
+    ):
+        out = runner.invoke(app, ["health", "data", "300"])
+    assert out.exit_code == 0
+
+
+def test_data_jobs_cover_every_source_and_are_unique():
+    jobs = data_jobs()
+    names = [j.name for j in jobs]
+    assert len(names) == len(set(names))
+    argv = " ".join(" ".join(j.argv) for j in jobs)
+    for source in ("insider", "events", "prices", "news", "congress"):
+        assert source in argv
+    assert {"label", "insights", "universe", "prune"} <= set(names)
+
+
+def test_research_commands_are_mounted():
+    out = runner.invoke(app, ["research", "--help"])
+    assert out.exit_code == 0 and "discover" in out.output

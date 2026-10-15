@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import feedparser
+import httpx
 from loguru import logger
 
 from ..storage import NewsItem, news_exists, save_news_item
@@ -367,6 +368,17 @@ class NewsCollector(BaseCollector):
 
         return matched
 
+    def _fetch_feed(self, feed_url: str) -> bytes:
+        """Download a feed with a hard timeout (feedparser's own fetch has none)."""
+        response = httpx.get(
+            feed_url,
+            timeout=20.0,
+            follow_redirects=True,
+            headers={"User-Agent": "FinanceWatchdog/1.0 (+https://github.com/dashpes/Archie)"},
+        )
+        response.raise_for_status()
+        return response.content
+
     def _parse_feed(self, feed_url: str) -> list[dict[str, Any]]:
         """
         Parse RSS feed and return entries.
@@ -380,7 +392,7 @@ class NewsCollector(BaseCollector):
         Raises:
             Exception: If feed parsing fails
         """
-        feed = feedparser.parse(feed_url)
+        feed = feedparser.parse(self._fetch_feed(feed_url))
 
         # Check for parsing errors
         if feed.bozo and feed.bozo_exception:

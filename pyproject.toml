@@ -41,8 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-investment-monitor = "investment_monitor.cli:main"
-investment-research = "investment_monitor.research_cli:main"
+investment-data = "investment_monitor.cli:main"
 investment-robo = "investment_monitor.robo.cli:main"
 
 [tool.hatch.build.targets.wheel]

@@ -67,6 +67,7 @@ from .insight_operations import (
     get_recent_findings,
     save_finding,
 )
+from .job_models import JobRun, last_job_success, record_job_run
 from .retention import RetentionConfig, prune_old_data
 
 __all__ = [
@@ -93,16 +94,12 @@ __all__ = [
     "get_unscored_news",
     "get_unclassified_news",
     "get_recent_news",
-    "save_etf_holdings",
-    "get_etf_holdings",
     # Research models
     "CANDIDATE_STATUSES",
     "StockCandidate",
     "CandidateScore",
     "CongressionalTrade",
     "SimulationResult",
-    "get_or_create_default_profile",
-    "save_profile",
     # Research operations - Candidate
     "save_candidate",
     "get_candidate_by_ticker",
@@ -112,10 +109,6 @@ __all__ = [
     "save_score",
     "get_latest_score",
     "get_score_history",
-    "save_report",
-    "get_latest_report",
-    "save_performance_record",
-    "get_records_needing_update",
     # Research operations - Congressional Trade
     "save_congressional_trade",
     "get_trades_for_ticker",
@@ -151,6 +144,10 @@ __all__ = [
     # Retention / cleanup
     "RetentionConfig",
     "prune_old_data",
+    # Scheduler job runs
+    "JobRun",
+    "record_job_run",
+    "last_job_success",
     "MemoryEmbedding",
     "save_embedding",
     "search_similar",

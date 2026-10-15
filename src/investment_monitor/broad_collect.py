@@ -1,19 +1,14 @@
 """Broad, universe-independent multi-source collection.
 
-The portfolio collectors (``main.py``) are scoped to holdings + watchlist tickers, so
-the market-wide event stream never lands in the DB. The insight engine needs the
-opposite: retain what is happening across the WHOLE market — e.g. every congressional
-trade, not just trades in names we already hold — so cross-source confluence can later
-be mined from it.
-
-This runner invokes collectors in their broad ``collect_all`` mode, decoupled from the
-configured universe. It is the foundation the original "aggregate → unique insight"
-vision was missing (see the insight-engine-gap analysis).
+Each source runs in its own session and commits on its own, so a slow or failing
+source never holds the write lock for the others. The insight engine mines this
+market-wide stream for cross-source confluence.
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from loguru import logger
 
@@ -31,59 +26,84 @@ from investment_monitor.storage import get_session, init_db
 _PRICE_WINDOW_DAYS = 30
 _PRICE_MAX_TICKERS = 500
 
+# Order matters: insider first (it defines the relevant universe), then prices for
+# that universe, then market-wide news and congress.
+SOURCES = ("insider", "events", "prices", "news", "congress")
+
+
+async def collect_source(
+    name: str, settings: Settings, *, days_back: int = 1, limit: int | None = None
+) -> CollectorResult:
+    """Run one broad collector in its own session."""
+    with get_session() as session:
+        if name == "insider":
+            return await InsiderCollector(session, settings).collect_all(
+                days_back=days_back, limit=limit
+            )
+        if name == "events":
+            return await MaterialEventsCollector(session, settings).collect_all(
+                days_back=days_back, limit=limit
+            )
+        if name == "prices":
+            return await PriceCollector(session, settings).collect_all(
+                window_days=_PRICE_WINDOW_DAYS, max_tickers=_PRICE_MAX_TICKERS
+            )
+        if name == "news":
+            return await NewsCollector(session, settings).collect_all()
+        if name == "congress":
+            # PTRs disclose up to 45 days late, so each run sweeps a trailing window
+            # of submissions and dedup makes re-sweeps no-ops.
+            return await CongressTradesCollector(session, settings).collect_all(
+                days_back=max(7, days_back)
+            )
+    raise ValueError(f"unknown source {name!r}; expected one of {SOURCES}")
+
 
 async def run_broad_collection(
-    settings: Settings | None = None, *, days_back: int = 1, limit: int | None = None
+    settings: Settings | None = None,
+    *,
+    days_back: int = 1,
+    limit: int | None = None,
+    sources: tuple[str, ...] | list[str] | None = None,
 ) -> list[CollectorResult]:
-    """Run every broad (universe-independent) collector, returning their results.
+    """Run the requested broad collectors (default: all), returning their results.
 
-    Order matters: insider first (it defines the relevant universe), then prices for
-    that universe (volume-spike confluence + price context), then market-wide news.
-
-    Args:
-        settings: app settings (defaults to ``get_settings()``).
-        days_back: recent business days of SEC daily indexes to ingest.
-        limit: cap on filings parsed per source this run (safety/testing bound).
+    A source that raises is reported as a failed result; the others still run.
     """
     settings = settings or get_settings()
     init_db(settings.db_path)
-
     results: list[CollectorResult] = []
-    with get_session() as session:
-        # 1. SEC Form 4 insider transactions, retained market-wide (free, authoritative).
-        insider = InsiderCollector(session, settings)
-        results.append(await insider.collect_all(days_back=days_back, limit=limit))
-
-        # 1.5. SEC 8-K material corporate events, market-wide (same daily indexes,
-        #      header-only fetches). The raw event stream for event-driven theses.
-        events = MaterialEventsCollector(session, settings)
-        results.append(await events.collect_all(days_back=days_back, limit=limit))
-
-        # 2. Daily OHLCV for the insider-active universe (foundation for volume-spike
-        #    confluence + price context). No-op on a fresh DB with no insider rows.
-        prices = PriceCollector(session, settings)
-        results.append(await prices.collect_all(
-            window_days=_PRICE_WINDOW_DAYS, max_tickers=_PRICE_MAX_TICKERS,
-        ))
-
-        # 3. Market-wide news (non-directional context).
-        news = NewsCollector(session, settings)
-        results.append(await news.collect_all())
-
-        # 4. Congressional trades from the official Senate eFD system (the free
-        #    stock-watcher S3 mirrors died; House PTRs are scanned PDFs, still
-        #    unsourced). PTRs disclose up to 45 days late, so each run sweeps a
-        #    trailing window of SUBMISSIONS and dedup makes re-sweeps no-ops.
-        congress = CongressTradesCollector(session, settings)
-        results.append(await congress.collect_all(days_back=max(7, days_back)))
-
+    for name in sources or SOURCES:
+        started = datetime.now()
+        try:
+            results.append(
+                await collect_source(name, settings, days_back=days_back, limit=limit)
+            )
+        except Exception as exc:  # noqa: BLE001 - one source must not abort the rest
+            logger.error("broad-collect: {n} raised: {e}", n=name, e=exc)
+            results.append(
+                CollectorResult(
+                    collector_name=name,
+                    success=False,
+                    records_collected=0,
+                    errors=[str(exc)],
+                    started_at=started,
+                    finished_at=datetime.now(),
+                )
+            )
     for r in results:
         logger.info(f"broad-collect: {r}")
     return results
 
 
 def run_broad_collection_sync(
-    settings: Settings | None = None, *, days_back: int = 1, limit: int | None = None
+    settings: Settings | None = None,
+    *,
+    days_back: int = 1,
+    limit: int | None = None,
+    sources: tuple[str, ...] | list[str] | None = None,
 ) -> list[CollectorResult]:
-    """Synchronous wrapper around :func:`run_broad_collection` for CLI/cron use."""
-    return asyncio.run(run_broad_collection(settings, days_back=days_back, limit=limit))
+    """Synchronous wrapper around :func:`run_broad_collection` for CLI use."""
+    return asyncio.run(
+        run_broad_collection(settings, days_back=days_back, limit=limit, sources=sources)
+    )

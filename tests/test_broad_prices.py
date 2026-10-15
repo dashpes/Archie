@@ -60,6 +60,7 @@ def _ohlcv_frame(tickers: list[str], periods: int = 3) -> pd.DataFrame:
             "High": [105.0 + n for n in range(periods)],
             "Low": [99.0 + n for n in range(periods)],
             "Close": [104.0 + n for n in range(periods)],
+            "Adj Close": [103.0 + n for n in range(periods)],
             "Volume": [1_000_000 + n for n in range(periods)],
         }, index=dates)
 
@@ -70,6 +71,7 @@ def _ohlcv_frame(tickers: list[str], periods: int = 3) -> pd.DataFrame:
         cols[(t, "High")] = [base + 5 + n for n in range(periods)]
         cols[(t, "Low")] = [base - 1 + n for n in range(periods)]
         cols[(t, "Close")] = [base + 4 + n for n in range(periods)]
+        cols[(t, "Adj Close")] = [base + 3 + n for n in range(periods)]
         cols[(t, "Volume")] = [1_000_000 + n for n in range(periods)]
     frame = pd.DataFrame(cols, index=dates)
     frame.columns = pd.MultiIndex.from_tuples(frame.columns)
@@ -203,3 +205,19 @@ async def test_relevant_tickers_helper_returns_distinct_recent(tmp_path):
     tickers = c._relevant_tickers(window_days=30)
     assert set(tickers) == {"AAA", "BBB"}  # distinct, stale ZZZ excluded
     assert len(tickers) == 2  # AAA appears once despite two rows
+
+
+@pytest.mark.asyncio
+async def test_collect_all_pins_raw_prices_and_keeps_adj_close(tmp_path):
+    """Raw close is what trades against a fill cost; the adjusted close is kept beside it."""
+    db = tmp_path / "p.db"
+    init_db(db)
+    with get_session() as s:
+        _seed_insider(s, "AAPL", date.today())
+    frame = _ohlcv_frame(["AAPL"])
+    with patch("investment_monitor.collectors.prices.yf.download", return_value=frame) as dl:
+        await _collector(tmp_path, db).collect_all()
+    assert dl.call_args.kwargs["auto_adjust"] is False
+    with get_session() as s:
+        pairs = [(r.adj_close, r.close) for r in s.scalars(select(Price).where(Price.ticker == "AAPL"))]
+    assert pairs and all(adj is not None and adj < close for adj, close in pairs)

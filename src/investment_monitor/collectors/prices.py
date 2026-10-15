@@ -197,6 +197,7 @@ class PriceCollector(BaseCollector):
                 group_by="ticker",
                 progress=False,
                 threads=True,
+                auto_adjust=False,
             )
         except Exception as e:
             logger.error(f"{self.name}: yfinance download failed: {e}")
@@ -276,6 +277,7 @@ class PriceCollector(BaseCollector):
                 high=self._safe_float(row.get("High")),
                 low=self._safe_float(row.get("Low")),
                 close=float(close_price),
+                adj_close=self._safe_float(row.get("Adj Close")),
                 volume=self._safe_int(row.get("Volume")),
             )
 
@@ -335,6 +337,7 @@ class PriceCollector(BaseCollector):
             start=start_date.isoformat(),
             end=end_date.isoformat(),
             progress=False,
+            auto_adjust=False,
         )
 
         if data.empty:

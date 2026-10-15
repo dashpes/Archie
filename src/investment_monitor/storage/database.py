@@ -17,7 +17,7 @@ _SessionLocal = None
 def attach_sqlite_pragmas(engine) -> None:
     """WAL + busy_timeout on every connection of ``engine``.
 
-    WAL lets readers (the dashboard) proceed while a trade/research run writes;
+    WAL lets the bot container read while the data container writes;
     busy_timeout retries briefly instead of raising ``database is locked``. The
     journal mode is persistent per DB file, so the first writer flips it once.
     """
@@ -27,7 +27,7 @@ def attach_sqlite_pragmas(engine) -> None:
         cursor = dbapi_conn.cursor()
         try:
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA busy_timeout=30000")
         finally:
             cursor.close()
 

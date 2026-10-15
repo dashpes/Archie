@@ -34,6 +34,8 @@ class Price(Base):
     high: Mapped[float] = mapped_column(Float, nullable=True)
     low: Mapped[float] = mapped_column(Float, nullable=True)
     close: Mapped[float] = mapped_column(Float, nullable=False)
+    # Split/dividend-adjusted close (yfinance 'Adj Close'). Raw close is what trades.
+    adj_close: Mapped[float | None] = mapped_column(Float, nullable=True)
     volume: Mapped[int] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False

@@ -6,12 +6,12 @@ This module provides CLI commands for stock research operations including:
 - Monte Carlo simulation for risk analysis
 
 Usage:
-    investment-research discover [--dry-run]
-    investment-research top [--limit N] [--min-score N]
-    investment-research simulate --ticker TICKER [--force] [--horizons 30,90,252]
-    investment-research simulate --tickers AAPL,MSFT,GOOGL
-    investment-research simulate --auto
-    investment-research simulation-results [--ticker TICKER] [--latest N]
+    investment-data research discover [--dry-run]
+    investment-data research top [--limit N] [--min-score N]
+    investment-data research simulate --ticker TICKER [--force] [--horizons 30,90,252]
+    investment-data research simulate --tickers AAPL,MSFT,GOOGL
+    investment-data research simulate --auto
+    investment-data research simulation-results [--ticker TICKER] [--latest N]
 """
 
 from __future__ import annotations

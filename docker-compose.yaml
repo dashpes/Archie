@@ -1,0 +1,40 @@
+# Two services from one image, sharing one SQLite file.
+#
+# The ./data bind mount MUST be a local filesystem on this host. SQLite's WAL
+# mode shares its -shm file through the kernel page cache, which is not safe on
+# NFS, SMB or CIFS. Keep data/ on local disk.
+#
+# Secrets come from .env (see .env.example). With the `ollama` profile, set
+# OLLAMA_HOST=http://ollama:11434 in .env.
+
+x-app: &app
+  build: .
+  image: financewatchdog:local
+  env_file: .env
+  environment:
+    TZ: America/New_York
+  volumes:
+    - ./data:/app/data
+    - ./logs:/app/logs
+    - ./config:/app/config:ro
+  restart: unless-stopped
+
+services:
+  data:
+    <<: *app
+    command: ["investment-data", "serve"]
+    healthcheck:
+      test: ["CMD", "investment-data", "health", "data", "300"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
