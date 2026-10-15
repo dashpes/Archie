@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from investment_monitor.storage import (
-    EarningsDate,
     InsiderTransaction,
     NewsItem,
     Price,
@@ -17,7 +16,6 @@ from investment_monitor.storage import (
     init_db,
     news_exists,
     price_exists,
-    save_earnings_date,
     save_insider_transaction,
     save_news_item,
     save_price,
@@ -111,12 +109,4 @@ def test_save_insider_transaction(db_session):
     # Should not raise
 
 
-def test_save_earnings_date(db_session):
-    """Test saving earnings dates."""
-    earnings = EarningsDate(
-        ticker="AAPL",
-        earnings_date=date(2026, 2, 2),
-        confirmed=True,
-    )
-    save_earnings_date(db_session, earnings)
     # Should not raise

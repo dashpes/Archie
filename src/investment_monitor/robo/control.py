@@ -26,8 +26,13 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from investment_monitor.config import Settings
+    from investment_monitor.robo.config import RoboConfig
 
 
 @dataclass(frozen=True)
@@ -139,3 +144,21 @@ def set_force_dry_run(
         by=updated_by,
     )
     return state
+
+
+def resolve_dry_run(
+    config: RoboConfig, settings: Settings, override: bool | None
+) -> bool:
+    """Live only when every kill-switch is off AND config/override permit it.
+
+    The control file (written by the dashboard/CLI) is one-way: it can force
+    paper mode here, but clearing it never arms live trading — that still takes
+    the .env kill-switch AND config/override agreeing.
+    """
+    if settings.robo_force_dry_run:
+        return True
+    if load_control(settings.db_path).force_dry_run:
+        return True
+    if override is not None:
+        return override
+    return config.dry_run

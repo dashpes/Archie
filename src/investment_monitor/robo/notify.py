@@ -1,18 +1,17 @@
-"""iMessage notifications for the robo advisor's live runs.
+"""Email notifications for the bot's runs.
 
-A thin, synchronous, fail-open bridge between the (sync) robo CLI and the iMessage
-channel. Three triggers, matching what the operator asked to be notified about:
+A thin, synchronous, fail-open bridge between the (sync) CLI and the email
+channel. Two triggers:
 
   * trades executed — every BUY/SELL actually placed in a run (live; paper only when
-    ``IMESSAGE_NOTIFY_PAPER`` is set);
+    ``NOTIFY_PAPER_TRADES`` is set);
   * run errors      — a run that refused (margin!), failed, or errored, plus broker
-    errors raised before a result exists;
-  * daily summary   — portfolio value and P&L, sent by the ``daily-summary`` command.
+    errors raised before a result exists.
 
 Design rules:
   * Never raise. A notification problem must never affect trading — every public
     function swallows its own exceptions.
-  * Silent when unconfigured. With ``IMESSAGE_TO`` blank there is no channel and the
+  * Silent when unconfigured. With ``SMTP_HOST`` or ``EMAIL_TO`` blank there is no channel and the
     functions are no-ops, so the feature is opt-in and the default path is byte-identical.
   * Read placed orders from the DB by ``run_id`` rather than threading state through
     the rebalance core — the trading pipeline needs no changes to support this.
@@ -28,9 +27,7 @@ from loguru import logger
 from investment_monitor.config import Settings
 
 if TYPE_CHECKING:
-    from investment_monitor.robo.models import AccountState
-    from investment_monitor.robo.pnl import RealizedPnL
-    from investment_monitor.robo.rebalance import RebalanceResult
+    from investment_monitor.robo.models import RebalanceResult
 
 # Statuses that mean "this run did not complete normally" — always worth a ping,
 # regardless of mode (a silently dead or refused trader is the worst outcome).
@@ -209,189 +206,7 @@ def _placed_order_rows(run_id: str, settings: Settings) -> list[dict]:
         ]
 
 
-def todays_trade_rows(settings: Settings) -> list[dict]:
-    """Today's (UTC) placed/simulated orders with their rationale — for the daily summary."""
-    from datetime import datetime, timezone
-
-    from investment_monitor.storage import get_session, init_db
-    from investment_monitor.storage.robo_models import RoboOrder
-
-    init_db(settings.db_path)
-    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
-    rows: list[dict] = []
-    try:
-        with get_session() as session:
-            for r in (
-                session.query(RoboOrder)
-                .filter(RoboOrder.created_at >= start)
-                .order_by(RoboOrder.created_at.asc())
-                .all()
-            ):
-                if r.placed or r.simulated:
-                    rows.append(_order_row(r))
-    except Exception as exc:  # noqa: BLE001 - the summary must never fail on the trades block
-        logger.warning("todays_trade_rows failed (ignored): {e}", e=exc)
-    return rows
-
-
-def todays_trade_lines(settings: Settings) -> list[str]:
-    """Today's trades as plain-text lines (kept for the CLI echo path and tests)."""
-    return trade_text_lines(todays_trade_rows(settings))
-
-
-def format_daily_summary(
-    account: AccountState,
-    realized: RealizedPnL | None = None,
-    trades: list[str] | None = None,
-) -> str:
-    """Build the daily-summary text (pure: no I/O, no DB, no network).
-
-    ``trades`` is a pre-formatted list of today's trade lines (with their 'why'); when
-    non-empty it is shown as a "Today's trades" section so the summary explains what the
-    advisor did and why, not just the ending balances.
-    """
-    body = [
-        f"{'Portfolio value':<18}{_money(account.total_value)}",
-        f"{'Cash available':<18}{_money(account.settled_cash)}",
-    ]
-    unrealized = account.total_unrealized_gain
-    if unrealized is not None:
-        basis = account.total_cost_basis
-        pct = f"  ({unrealized / basis * 100:+.1f}%)" if basis and basis > 0 else ""
-        body.append(f"{'Unrealised P&L':<18}{_signed_money(unrealized)}{pct}")
-    if realized is not None:
-        body.append(f"{'Realised P&L':<18}{_signed_money(realized.total_realized)}")
-
-    if trades:
-        body.append("")
-        body.append("Today's trades:")
-        body.extend(trades)
-
-    movers = [p for p in account.positions if p.unrealized_gain is not None]
-    movers.sort(key=lambda p: abs(p.unrealized_gain), reverse=True)
-    if movers:
-        body.append("")
-        body.append("Top movers:")
-        body.extend(f"  {p.symbol}: {_signed_money(p.unrealized_gain)}" for p in movers[:5])
-
-    title = f"Daily Portfolio Summary · {_british_date(date.today())}"
-    return _compose(title, "\n".join(body))
-
-
 # --- HTML letter data gatherers (each fail-open: None means "omit the section") ---
-
-def _html_theses(settings: Settings) -> list[dict] | None:
-    """Live theses as row dicts for the HTML letter (conviction delta from history)."""
-    try:
-        from investment_monitor.storage import get_session, init_db
-        from investment_monitor.storage.thesis_operations import get_active_theses
-
-        init_db(settings.db_path)
-        rows: list[dict] = []
-        with get_session() as session:
-            for t in get_active_theses(session):
-                delta = None
-                history = t.conviction_history or []
-                if len(history) >= 2:
-                    try:
-                        delta = float(history[-1]["conviction"]) - float(history[-2]["conviction"])
-                    except (KeyError, TypeError, ValueError):
-                        delta = None
-                narrative = (t.narrative or "").strip()
-                rows.append(
-                    {
-                        "symbol": t.symbol,
-                        "status": t.status,
-                        "conviction": t.conviction,
-                        "delta": delta,
-                        "target_weight": t.target_weight,
-                        "excerpt": narrative[:140] + ("…" if len(narrative) > 140 else ""),
-                    }
-                )
-        return rows
-    except Exception as exc:  # noqa: BLE001 - a missing section, never a failed letter
-        logger.debug("theses section unavailable (ignored): {e}", e=exc)
-        return None
-
-
-def _html_findings(settings: Settings, *, days: int = 2, limit: int = 5) -> list[dict] | None:
-    """Recent confluence findings for the 'Signals of Note' section."""
-    try:
-        from investment_monitor.storage import get_session, init_db
-        from investment_monitor.storage.insight_operations import get_recent_findings
-
-        init_db(settings.db_path)
-        with get_session() as session:
-            return [
-                {
-                    "ticker": f.ticker,
-                    "kind": f.kind,
-                    "score": f.score,
-                    "narrative": (f.narrative or "").strip(),
-                }
-                for f in get_recent_findings(session, limit=limit, max_age_days=days)
-            ]
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("signals section unavailable (ignored): {e}", e=exc)
-        return None
-
-
-def _html_learning(settings: Settings) -> dict | None:
-    """Account-wide calibration aggregate (win rate + Brier) for the appendix."""
-    try:
-        from investment_monitor.storage import get_session, init_db
-        from investment_monitor.storage.learning_models import (
-            LEARNING_KIND_OUTCOME,
-            LearningEvent,
-        )
-
-        init_db(settings.db_path)
-        with get_session() as session:
-            # Materialize scalars inside the session — the rows detach on exit.
-            outcomes = [
-                (int(e.direction_correct or 0), e.brier)
-                for e in session.query(LearningEvent)
-                .filter(LearningEvent.kind == LEARNING_KIND_OUTCOME)
-                .all()
-            ]
-        if not outcomes:
-            return None
-        hits = [h for h, _ in outcomes]
-        briers = [float(b) for _, b in outcomes if b is not None]
-        return {
-            "n": len(outcomes),
-            "win_rate": sum(hits) / len(hits),
-            "brier": (sum(briers) / len(briers)) if briers else None,
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("learning section unavailable (ignored): {e}", e=exc)
-        return None
-
-
-def _prev_total_value(settings: Settings):
-    """Total value from the last run before today (UTC) — the 'since my last note' delta."""
-    try:
-        from datetime import datetime, timezone
-
-        from investment_monitor.storage import get_session, init_db
-        from investment_monitor.storage.robo_models import RoboRun
-
-        init_db(settings.db_path)
-        start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0, tzinfo=None
-        )
-        with get_session() as session:
-            row = (
-                session.query(RoboRun)
-                .filter(RoboRun.started_at < start, RoboRun.total_value.isnot(None))
-                .order_by(RoboRun.started_at.desc())
-                .first()
-            )
-            return row.total_value if row is not None else None
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("prev total unavailable (ignored): {e}", e=exc)
-        return None
-
 
 def _rejected_order_rows(run_id: str, settings: Settings) -> list[dict] | None:
     """Orders the gate declined in a run — the confirmation letter's appendix."""
@@ -494,55 +309,6 @@ def notify_error(settings: Settings, *, message: str, dry_run: bool | None = Non
         _send(settings, _compose(title, message), subject=_subject(title), html=html)
     except Exception as exc:  # noqa: BLE001 - fail-open
         logger.warning("robo notify_error failed (ignored): {e}", e=exc)
-
-
-def send_daily_summary(
-    settings: Settings,
-    account: AccountState,
-    realized: RealizedPnL | None = None,
-    trades: list[str] | None = None,
-    *,
-    trade_rows: list[dict] | None = None,
-    dry_run: bool | None = None,
-) -> bool:
-    """Send the daily portfolio/P&L summary. Returns True if sent.
-
-    ``trades`` (pre-formatted lines) remains the plain-text input; ``trade_rows``
-    (structured dicts from :func:`todays_trade_rows`) additionally feeds the HTML
-    letter. Every extra HTML section is gathered fail-open — a data problem can
-    only ever shrink the letter, never block the summary.
-    """
-    try:
-        title = f"Daily Portfolio Summary · {_british_date(date.today())}"
-        if trades is None and trade_rows is not None:
-            trades = trade_text_lines(trade_rows)
-        html = None
-        try:
-            if _wants_html(settings):
-                from investment_monitor.robo import email_html
-
-                html = email_html.render_daily_summary(
-                    date_str=_british_date(date.today()),
-                    mode=_mode(dry_run) if dry_run is not None else "Paper",
-                    account=account,
-                    realized=realized,
-                    trade_rows=trade_rows,
-                    theses=_html_theses(settings),
-                    findings=_html_findings(settings),
-                    learning=_html_learning(settings),
-                    prev_total=_prev_total_value(settings),
-                )
-        except Exception as exc:  # noqa: BLE001 - HTML is optional garnish
-            logger.debug("daily summary HTML skipped: {e}", e=exc)
-        return _send(
-            settings,
-            format_daily_summary(account, realized, trades),
-            subject=_subject(title),
-            html=html,
-        )
-    except Exception as exc:  # noqa: BLE001 - fail-open
-        logger.warning("robo daily summary notify failed (ignored): {e}", e=exc)
-        return False
 
 
 def send_test(settings: Settings) -> bool:

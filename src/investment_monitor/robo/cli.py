@@ -1,43 +1,32 @@
-"""Command-line interface for the robo advisor.
+"""Command-line interface for the trading bot.
 
 Usage:
+    investment-robo accounts
     investment-robo check-safety [--config DIR] [--raw]
-    investment-robo run [--dry-run | --live] [--config DIR]
     investment-robo status [--limit N] [--run-id RUN_ID]
+    investment-robo pnl
+    investment-robo pause / resume
+    investment-robo notify-test
+    investment-robo backtest [--days N]
+    investment-robo prune
 
 `check-safety` connects to Public, confirms the account is cash-only, and exits
-non-zero if margin is present. `run` executes one rebalance (dry-run unless live
-is explicitly enabled AND the env kill-switch is off). `status` shows recent runs.
+non-zero if margin is present. `status` shows recent runs.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
 
 import typer
 
 from investment_monitor.config import get_settings
-from investment_monitor.robo import tunables
 from investment_monitor.robo.broker import BrokerError, PublicBroker
 from investment_monitor.robo.config import ConfigError, RoboConfig
-from investment_monitor.robo.notify import (
-    format_daily_summary,
-    notifications_configured,
-    notify_error,
-    notify_run,
-    send_daily_summary,
-    send_test,
-    todays_trade_rows,
-    trade_text_lines,
-)
-from investment_monitor.robo.rebalance import rebalance_run
+from investment_monitor.robo.notify import send_test
 from investment_monitor.storage import (
-    accuracy_stats_for_symbol,
     get_filled_robo_orders,
-    get_outcome_symbols,
     get_recent_robo_runs,
     get_robo_orders_for_run,
     get_session,
@@ -46,7 +35,7 @@ from investment_monitor.storage import (
 
 app = typer.Typer(
     name="investment-robo",
-    help="Cash-only, long-only robo advisor for a Public.com account.",
+    help="Cash-only, long-only trading bot for a Public.com account.",
     no_args_is_help=True,
 )
 
@@ -57,121 +46,10 @@ def _load_config(config_dir: Path | None) -> RoboConfig:
     try:
         return RoboConfig.from_yaml(Path(cfg_dir) / "robo.yaml")
     except ConfigError as exc:
-        # A bad robo.yaml must never crash a CLI command or a launchd daemon
-        # with a raw traceback (which would silently halt the autonomous
-        # trader). Surface one clear, actionable message and exit non-zero.
+        # A bad robo.yaml must never crash a command with a raw traceback.
+        # Surface one clear, actionable message and exit non-zero.
         typer.secho(f"Config error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
-
-
-def _config_path(config_dir: Path | None) -> Path:
-    cfg_dir = config_dir or get_settings().config_dir
-    return Path(cfg_dir) / "robo.yaml"
-
-
-# --- `config`: view + tune settings (the same schema a GUI would render) ----------
-
-config_app = typer.Typer(
-    name="config",
-    help="View and tune robo settings. The catalog is shared with any future GUI.",
-    no_args_is_help=True,
-)
-app.add_typer(config_app)
-
-# Settings whose change affects real-money behavior — flagged on `set`.
-_SAFETY_KEYS = {"dry_run", "mode"}
-
-
-def _fmt_range(t: tunables.Tunable) -> str:
-    if t.choices:
-        return "{" + " | ".join(t.choices) + "}"
-    if t.minimum is not None or t.maximum is not None:
-        lo = "" if t.minimum is None else f"{t.minimum:g}"
-        hi = "" if t.maximum is None else f"{t.maximum:g}"
-        return f"[{lo}…{hi}]"
-    return ""
-
-
-@config_app.command("list")
-def config_list(
-    group: str = typer.Option(None, "--group", "-g", help="Filter to one group."),
-    as_json: bool = typer.Option(False, "--json", help="Emit the catalog + current values as JSON."),
-    config_dir: Path = typer.Option(None, "--config", help="Config directory."),
-) -> None:
-    """List every tunable setting with its current value, default, and bounds."""
-    cfg = _load_config(config_dir)
-    items = [t for t in tunables.catalog() if group is None or t.group.lower() == group.lower()]
-    if as_json:
-        payload = [{**t.as_dict(), "current": tunables.get_value(cfg, t.key)} for t in items]
-        typer.echo(json.dumps(payload, indent=2, default=str))
-        return
-    if not items:
-        typer.echo("No settings match.")
-        return
-    current_group = None
-    for t in items:
-        if t.group != current_group:
-            current_group = t.group
-            typer.secho(f"\n{current_group}", fg=typer.colors.CYAN, bold=True)
-        value = tunables.get_value(cfg, t.key)
-        rng = _fmt_range(t)
-        line = f"  {t.key:<24} = {str(value):<12} default {str(t.default):<8} {rng}"
-        typer.echo(line.rstrip())
-        if t.description:
-            typer.secho(f"      {t.description}", fg=typer.colors.BRIGHT_BLACK)
-
-
-@config_app.command("get")
-def config_get(
-    key: str = typer.Argument(..., help="Dotted setting key, e.g. caps.max_positions."),
-    config_dir: Path = typer.Option(None, "--config", help="Config directory."),
-) -> None:
-    """Show one setting's current value and metadata."""
-    t = {x.key: x for x in tunables.catalog()}.get(key)
-    if t is None:
-        typer.secho(f"Unknown setting '{key}'. Run `config list`.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-    value = tunables.get_value(_load_config(config_dir), key)
-    typer.secho(f"{t.key} = {value}", fg=typer.colors.GREEN, bold=True)
-    typer.echo(f"  {t.title} — {t.description}")
-    typer.echo(f"  type: {t.type}   default: {t.default}   {_fmt_range(t)}".rstrip())
-    if t.unit:
-        typer.echo(f"  unit: {t.unit}")
-
-
-@config_app.command("set")
-def config_set(
-    key: str = typer.Argument(..., help="Dotted setting key, e.g. caps.max_positions."),
-    value: str = typer.Argument(..., help="New value (validated against the schema)."),
-    config_dir: Path = typer.Option(None, "--config", help="Config directory."),
-) -> None:
-    """Validate and write a setting to robo.yaml (comments preserved)."""
-    path = _config_path(config_dir)
-    # The OLD value is shown for context only. Loading the current config to read
-    # it must NOT block the write: this command is the operator's tool for REPAIRING
-    # a robo.yaml that is currently out of bounds (which makes _load_config exit) or
-    # otherwise unloadable. The authoritative safety check is tunables.set_value,
-    # which validates the FULL merged config before writing — so a bad sibling field
-    # still blocks an invalid write, but a valid single-key repair succeeds.
-    try:
-        old = tunables.get_value(_load_config(config_dir), key)
-    except (AttributeError, typer.Exit):
-        old = "(unavailable)"
-    try:
-        new = tunables.set_value(path, key, value)
-    except ValueError as exc:
-        typer.secho(f"Rejected: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-    typer.secho(f"Set {key}: {old} → {new}", fg=typer.colors.GREEN)
-    if key in _SAFETY_KEYS:
-        typer.secho(
-            "  ⚠ this affects live trading behavior — confirm it's intended.",
-            fg=typer.colors.YELLOW,
-        )
-    typer.secho(
-        "  A running daemon picks this up on its next scheduled run.",
-        fg=typer.colors.BRIGHT_BLACK,
-    )
 
 
 @app.command("accounts")
@@ -204,7 +82,7 @@ def accounts(
         )
     else:
         typer.secho(
-            "\nNo CASH account found — the robo advisor requires one and will refuse to run.",
+            "\nNo CASH account found — the bot requires one and will refuse to run.",
             fg=typer.colors.RED,
         )
 
@@ -253,189 +131,11 @@ def check_safety(
 
     if not account.is_cash_account or account.has_margin:
         typer.secho(
-            "\nUNSAFE: account is not cash-only / has margin. The robo advisor will refuse to run.",
+            "\nUNSAFE: account is not cash-only / has margin. The bot will refuse to run.",
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(code=1)
     typer.secho("\nSAFE: cash-only account confirmed.", fg=typer.colors.GREEN)
-
-
-@app.command("run")
-def run(
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Force simulation (no real orders)"),
-    live: bool = typer.Option(False, "--live", help="Attempt live trading (still gated by env + config)"),
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the live-trading confirmation prompt"),
-) -> None:
-    """Run one rebalance. Dry-run unless --live is set AND ROBO_FORCE_DRY_RUN is false."""
-    if dry_run and live:
-        typer.secho("Choose only one of --dry-run / --live", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
-    settings = get_settings()
-    cfg = _load_config(config)
-
-    override: bool | None = True if dry_run else (False if live else None)
-    # Confirm before any potentially-live run.
-    if live and not settings.robo_force_dry_run and not yes:
-        if not typer.confirm("This may place REAL orders with REAL money. Continue?"):
-            raise typer.Exit(code=1)
-
-    try:
-        result = rebalance_run(cfg, settings, dry_run_override=override)
-    except BrokerError as exc:
-        notify_error(settings, message=str(exc), dry_run=override)
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    notify_run(result, settings)
-    typer.echo(result.summary_line())
-    if result.status == "refused":
-        typer.secho(f"Refused: {result.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-    if result.status == "failed":
-        typer.secho(f"Failed: {result.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    rejected = [d for d in result.decisions if not d.accepted]
-    if rejected:
-        typer.echo("Rejected orders:")
-        for d in rejected:
-            o = d.order
-            size = f"${o.notional}" if o.notional is not None else f"{o.quantity} sh"
-            typer.echo(f"  {o.side.value:<4} {o.symbol:<6} {size:<10} -> {d.code}: {d.reason}")
-
-
-@app.command("thesis-run")
-def thesis_run(
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Force simulation (no real orders)"),
-    skip_maintenance: bool = typer.Option(
-        False, "--skip-maintenance", help="Skip LLM thesis re-eval; just rebalance to conviction"
-    ),
-    discover: bool = typer.Option(
-        False, "--discover", help="Run research discovery first to source new candidates"
-    ),
-    no_trade: bool = typer.Option(
-        False, "--no-trade", help="Research + maintain theses only; skip the rebalance/trading step"
-    ),
-) -> None:
-    """Autonomous loop: discover -> promote -> re-evaluate theses -> rebalance to conviction.
-
-    Forces autonomous mode regardless of robo.yaml. Live trading still requires
-    ROBO_FORCE_DRY_RUN=false AND dry_run=false (both off by default), so this is a
-    safe paper-trading loop out of the box.
-    """
-    from investment_monitor.analysis.model_router import ModelRouter
-    from investment_monitor.analysis.thesis_evaluator import (
-        ThesisEvaluator,
-        refresh_target_weights,
-        run_maintenance,
-    )
-
-    settings = get_settings()
-    cfg = _load_config(config)
-    auto_cfg = cfg if cfg.mode == "autonomous" else cfg.model_copy(update={"mode": "autonomous"})
-    acct = auto_cfg.account_id or None
-
-    init_db(settings.db_path)
-    # Thesis synthesis uses the stronger 'synthesis'-role model (Phase 5 routing).
-    synth_llm = None
-    if auto_cfg.use_llm:
-        try:
-            from investment_monitor.analysis.local_llm import LocalLLM
-
-            synth_llm = LocalLLM(
-                model=ModelRouter(settings).resolve("synthesis", base_url=settings.ollama_host),
-                base_url=settings.ollama_host,
-            )
-        except ImportError:
-            synth_llm = None
-    evaluator = ThesisEvaluator(synth_llm, auto_cfg)
-
-    # 0. The agent runs its OWN research: discover + score candidates into the funnel.
-    if discover or auto_cfg.autonomy.discover:
-        import asyncio
-
-        from investment_monitor.research.discovery import DiscoveryPipeline
-        from investment_monitor.research_cli import _load_research_config
-
-        research_config = _load_research_config(settings.config_dir)
-        typer.echo("Running research discovery (collect + AI-score the universe)...")
-        with get_session() as session:
-            pipeline = DiscoveryPipeline(
-                session=session,
-                config=settings,
-                research_config=research_config,
-                ollama_model=ModelRouter(settings).resolve("scoring", base_url=settings.ollama_host),
-            )
-            result = asyncio.run(pipeline.run_discovery(dry_run=False))
-        typer.echo(
-            f"Discovery: {result.scored_candidates} scored, "
-            f"{len(result.watchlist_additions)} reached the watchlist "
-            f"({result.duration_seconds:.0f}s)"
-        )
-
-    # 1. Autonomous selection: promote eligible discovery candidates to theses.
-    if auto_cfg.autonomy.enabled:
-        from investment_monitor.robo.promotion import promote_candidates
-
-        with get_session() as session:
-            promoted = promote_candidates(session, auto_cfg, evaluator=evaluator, account_id=acct)
-        if promoted:
-            typer.echo(f"Promoted {len(promoted)} new name(s): {', '.join(promoted)}")
-
-    # 1.5 Shadow ledger: sweep gate-rejects + discovery near-misses into the ledger,
-    #     mark open counterfactuals, close those past horizon. Fail-open bookkeeping.
-    try:
-        from investment_monitor.robo.shadow import maintain_shadow_ledger
-
-        with get_session() as session:
-            sh = maintain_shadow_ledger(
-                session,
-                score_floor=float(auto_cfg.autonomy.score_floor),
-                account_id=acct,
-            )
-        if any(sh.values()):
-            typer.echo(
-                f"Shadow ledger: +{sh['gate']} gate, +{sh['discovery']} discovery, "
-                f"{sh['marked']} marked, {sh['closed']} closed"
-            )
-    except Exception as exc:  # noqa: BLE001 - shadow bookkeeping must never block a run
-        typer.secho(f"shadow ledger maintenance skipped: {exc}", fg=typer.colors.YELLOW)
-
-    # 2. Maintain existing theses (deterministic invalidation, then LLM re-eval).
-    #    ACTIVE names daily; benched (WATCH) names weekly; weakest overflow benched.
-    if not skip_maintenance:
-        with get_session() as session:
-            actions = run_maintenance(session, evaluator, auto_cfg, account_id=acct)
-        typer.echo(
-            f"Thesis maintenance: {actions['updated']} updated, "
-            f"{actions['invalidated']} invalidated, {actions['exited']} exited (profit/horizon), "
-            f"{actions['unchanged']} unchanged, {actions['benched']} benched, "
-            f"{actions['revived']} revived ({actions['skipped_benched']} benched skipped)"
-        )
-
-    # 3. Recompute sized target weights from current convictions.
-    with get_session() as session:
-        refresh_target_weights(session, auto_cfg, account_id=acct)
-
-    # 4. Trade — unless this is a research-only run (24/7 schedule uses --no-trade).
-    if no_trade:
-        typer.echo("Research/maintenance complete (--no-trade: skipped the rebalance step).")
-        return
-
-    try:
-        result = rebalance_run(auto_cfg, settings, dry_run_override=(True if dry_run else None))
-    except BrokerError as exc:
-        notify_error(settings, message=str(exc), dry_run=True if dry_run else None)
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    notify_run(result, settings)
-    typer.echo(result.summary_line())
-    if result.status in ("refused", "failed"):
-        typer.secho(f"{result.status}: {result.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
 
 @app.command("status")
@@ -443,7 +143,7 @@ def status(
     limit: int = typer.Option(10, "--limit", help="Number of recent runs to show"),
     run_id: str = typer.Option("", "--run-id", help="Show orders for a specific run"),
 ) -> None:
-    """Show recent rebalance runs (and orders for a given run)."""
+    """Show recent runs (and orders for a given run)."""
     settings = get_settings()
     init_db(settings.db_path)
     with get_session() as session:
@@ -464,7 +164,7 @@ def status(
 
         runs = get_recent_robo_runs(session, limit=limit)
         if not runs:
-            typer.echo("No robo runs recorded yet.")
+            typer.echo("No runs recorded yet.")
             return
         typer.echo(
             f"{'started':<17} {'mode':<7} {'status':<10} {'value':>10} {'unreal':>9} "
@@ -531,7 +231,7 @@ def pnl(
         typer.echo("Unrealized P&L: n/a (broker reported no cost basis)")
 
     # Realized P&L, reconstructed from the bot's OWN filled orders (not the shared
-    # account's history) so manual/pre-existing positions never count as robo gains.
+    # account's history) so manual/pre-existing positions never count as bot gains.
     realized_total = None
     try:
         from investment_monitor.robo.pnl import realized_pnl, trades_from_fills
@@ -542,7 +242,7 @@ def pnl(
         realized_total = rp.total_realized
         realized_syms = {s: sp for s, sp in rp.per_symbol.items() if sp.realized != 0}
         if realized_syms:
-            typer.echo("\nRealized P&L (robo trades only):")
+            typer.echo("\nRealized P&L (bot trades only):")
             for sym, sp in sorted(realized_syms.items()):
                 typer.echo(f"  {sym:<6} ${sp.realized:+.2f}")
         typer.echo(f"Realized P&L:   ${realized_total:+.2f}")
@@ -551,60 +251,6 @@ def pnl(
 
     if realized_total is not None and total_unrl is not None:
         typer.echo(f"Total P&L:      ${realized_total + total_unrl:+.2f}  (realized + unrealized)")
-
-
-@app.command("daily-summary")
-def daily_summary(
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-) -> None:
-    """Text a daily portfolio + P&L summary via iMessage (and print it).
-
-    Read-only: fetches live account state from the broker, never trades. Intended to
-    run once a day after the close (see scripts/robo-schedule.sh). A no-op delivery
-    when IMESSAGE_TO is unset — the summary still prints.
-    """
-    settings = get_settings()
-    cfg = _load_config(config)
-    broker = PublicBroker(
-        api_token=settings.public_api_token,
-        account_id=cfg.account_id,
-        base_url=settings.public_api_base_url,
-        dry_run=True,
-    )
-    try:
-        account = broker.get_account_state()
-    except BrokerError as exc:
-        # A broken summary run is itself worth knowing about.
-        notify_error(settings, message=f"daily-summary: {exc}")
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    realized = None
-    try:
-        from investment_monitor.robo.pnl import realized_pnl, trades_from_fills
-
-        init_db(settings.db_path)
-        with get_session() as session:
-            realized = realized_pnl(trades_from_fills(get_filled_robo_orders(session)))
-    except Exception as exc:  # noqa: BLE001 - realized P&L is best-effort, never required
-        typer.secho(f"(realized P&L unavailable: {exc})", fg=typer.colors.YELLOW)
-
-    trade_rows = todays_trade_rows(settings)
-    trades = trade_text_lines(trade_rows)
-    typer.echo(format_daily_summary(account, realized, trades))
-    sent = send_daily_summary(
-        settings,
-        account,
-        realized,
-        trades,
-        trade_rows=trade_rows,
-        dry_run=settings.robo_force_dry_run or cfg.dry_run,
-    )
-    if notifications_configured(settings) and not sent:
-        typer.secho(
-            "(summary not sent — check notification config / logs)",
-            fg=typer.colors.YELLOW,
-        )
 
 
 @app.command("notify-test")
@@ -619,17 +265,14 @@ def notify_test() -> None:
         )
         raise typer.Exit(code=1)
 
-    channel, target = "email", settings.email_to
     if send_test(settings):
-        typer.secho(f"Sent test {channel} to {target}.", fg=typer.colors.GREEN)
+        typer.secho(f"Sent test email to {settings.email_to}.", fg=typer.colors.GREEN)
     else:
-        hint = (
-            "Check SMTP_HOST/PORT/USERNAME/PASSWORD (Gmail needs an App Password) and logs."
-            if email_on
-            else "Grant Automation permission to the runner (System Settings > Privacy & "
-            "Security > Automation) and ensure Messages.app is signed in."
+        typer.secho(
+            "Failed to send email. Check SMTP_HOST/PORT/USERNAME/PASSWORD "
+            "(Gmail needs an App Password) and logs.",
+            fg=typer.colors.RED, err=True,
         )
-        typer.secho(f"Failed to send {channel}. {hint}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
 
@@ -639,8 +282,7 @@ def pause(
 ) -> None:
     """Pause trading (the next trade runs record 'paused' and skip the broker).
 
-    Research, discovery, and data collection keep running. Resume with
-    `investment-robo resume`. The dashboard uses the same control file.
+    Data collection keeps running. Resume with `investment-robo resume`.
     """
     from investment_monitor.robo import control
 
@@ -662,32 +304,6 @@ def resume() -> None:
         typer.echo("Note: paper mode is still forced (control file / ROBO_FORCE_DRY_RUN).")
 
 
-@app.command("learning")
-def learning(
-    limit: int = typer.Option(20, "--limit", help="Recent outcomes per symbol to aggregate"),
-) -> None:
-    """Show what the feedback loop has learned per symbol (from learning_events).
-
-    The ledger holds the full history; this prints only the compact aggregates that
-    actually feed sizing and the re-eval prompt — hit rate, recency-weighted hit
-    rate, and calibration (1 - Brier; higher is better-calibrated).
-    """
-    settings = get_settings()
-    init_db(settings.db_path)
-    with get_session() as session:
-        symbols = get_outcome_symbols(session)
-        if not symbols:
-            typer.echo("No learning outcomes recorded yet.")
-            return
-        typer.echo(f"{'symbol':<8} {'n':>4} {'hit%':>6} {'ewma%':>6} {'calib':>6}")
-        for sym in symbols:
-            st = accuracy_stats_for_symbol(session, sym, recent_window=limit)
-            typer.echo(
-                f"{sym:<8} {st['n']:>4} {st['hit_rate'] * 100:>5.0f}% "
-                f"{st['ewma_hit_rate'] * 100:>5.0f}% {1.0 - st['brier']:>6.2f}"
-            )
-
-
 @app.command("backtest")
 def backtest(
     days: int = typer.Option(180, "--days", help="Replay window ending today"),
@@ -704,7 +320,7 @@ def backtest(
         10.0, "--trailing-arm", help="Gain % from entry required before the trailing stop arms"
     ),
 ) -> None:
-    """Walk-forward replay of confluence -> promotion -> exits over stored history.
+    """Walk-forward replay of confluence -> entry -> exits over stored history.
 
     Uses the REAL production scoring and guards as-of each past date (insider +
     volume sources; no look-ahead). Depth is bounded by ingested history — run
@@ -749,161 +365,13 @@ def backtest(
                    "for this window.")
 
 
-@app.command("simulate-book")
-def simulate_book(
-    top: int = typer.Option(20, "--top", help="How many of the strongest active theses to simulate"),
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-) -> None:
-    """Refresh Monte-Carlo risk sims for the book's strongest names (weekly cron).
-
-    Without a stored simulation, sizing falls back to the flat no-sim floor
-    (conviction x no_sim_weight_per_conviction) — the Kelly/CVaR risk layer never
-    engages. This runs the same analyzer the research pipeline uses, for the top
-    active theses by sized weight/conviction. Price history comes from yfinance at
-    sim time, so DB retention does not bound it. Fail-soft per ticker.
-    """
-    import yfinance as yf
-
-    from investment_monitor.simulation.analyzer import MonteCarloAnalyzer
-    from investment_monitor.simulation.models import SimulationConfig
-    from investment_monitor.storage import (
-        ThesisStatus,
-        get_active_theses,
-        get_candidate_by_ticker,
-        save_simulation_result,
-    )
-
-    settings = get_settings()
-    cfg = _load_config(config)
-    init_db(settings.db_path)
-
-    with get_session() as session:
-        theses = [
-            t for t in get_active_theses(session, cfg.account_id or None)
-            if t.status == ThesisStatus.ACTIVE.value
-        ]
-        theses.sort(key=lambda t: (-(t.target_weight or 0.0), -(t.conviction or 0.0), t.symbol))
-        symbols = list(dict.fromkeys(t.symbol for t in theses))[:max(1, top)]
-
-    if not symbols:
-        typer.echo("No active theses to simulate.")
-        return
-
-    analyzer = MonteCarloAnalyzer(config=SimulationConfig())
-    done = failed = 0
-    for symbol in symbols:
-        try:
-            info = yf.Ticker(symbol).info
-            price = info.get("currentPrice") or info.get("regularMarketPrice")
-            if not price:
-                typer.secho(f"  {symbol}: no current price; skipped", fg=typer.colors.YELLOW)
-                failed += 1
-                continue
-            with get_session() as session:
-                candidate = get_candidate_by_ticker(session, symbol)
-                score = float(candidate.composite_score or 0.0) if candidate else 0.0
-            # force=True: book names are held on thesis conviction, not the research
-            # score gate — a sim must exist for every name sizing may select.
-            output = analyzer.analyze(
-                ticker=symbol, entry_price=float(price), composite_score=score, force=True
-            )
-            with get_session() as session:
-                save_simulation_result(session, output)
-                session.commit()
-            done += 1
-            typer.echo(f"  {symbol}: simulated @ ${float(price):.2f}")
-        except Exception as exc:  # noqa: BLE001 - one bad ticker must not stop the sweep
-            failed += 1
-            typer.secho(f"  {symbol}: sim failed ({exc})", fg=typer.colors.YELLOW)
-    typer.echo(f"Simulated {done}/{len(symbols)} book names ({failed} failed).")
-
-
-@app.command("sentinel")
-def sentinel(
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-) -> None:
-    """Intraday watchdog over open positions: invalidate/flag only, never buy.
-
-    No-op outside regular trading hours, so an hourly timer needs no market-
-    calendar logic. A tripped invalidation zeroes the thesis; the actual sell
-    happens at the next scheduled, fully-gated trade run.
-    """
-    from investment_monitor.robo.sentinel import run_sentinel
-
-    settings = get_settings()
-    cfg = _load_config(config)
-    init_db(settings.db_path)
-    result = run_sentinel(settings, cfg)
-    if result["status"] == "market_closed":
-        typer.echo("Market closed — sentinel pass skipped.")
-        return
-    typer.echo(
-        f"Sentinel: {result['checked']} position(s) checked, "
-        f"{len(result['tripped'])} invalidated, {len(result['exited'])} exited, "
-        f"{len(result['flagged'])} flagged"
-    )
-    for line in result["tripped"] + result["exited"] + result["flagged"]:
-        typer.echo(f"  - {line}")
-
-
-@app.command("shadow")
-def shadow(
-    limit: int = typer.Option(15, "--limit", help="Open entries to list"),
-    evaluate: bool = typer.Option(
-        False, "--evaluate", help="Run a maintenance pass (sync + mark/close) first"
-    ),
-) -> None:
-    """Traded vs skipped: how the theses we did NOT take are performing.
-
-    The shadow ledger tracks every considered-but-skipped thesis (promotion floor,
-    caps, liquidity/run-up guards, gate rejects) at its skip-day price, so the skip
-    policy itself gets a report card next to the real-money outcomes.
-    """
-    from investment_monitor.robo.shadow import maintain_shadow_ledger, shadow_report
-    from investment_monitor.storage import SHADOW_STATUS_OPEN, get_shadow_entries
-
-    settings = get_settings()
-    init_db(settings.db_path)
-    with get_session() as session:
-        if evaluate:
-            maintain_shadow_ledger(session)
-        report = shadow_report(session)
-        entries = get_shadow_entries(session, status=SHADOW_STATUS_OPEN, limit=limit)
-
-        real = report["real"]
-        if real["n"]:
-            typer.echo(
-                f"real outcomes: n={real['n']}  hit {real['hit_rate'] * 100:.0f}%  "
-                f"avg {real['avg_return'] * 100:+.1f}%"
-            )
-        else:
-            typer.echo("real outcomes: none recorded yet")
-        for source, st in sorted(report["shadow"].items()):
-            hit = f"{st['hit_rate'] * 100:.0f}%" if st["hit_rate"] is not None else "—"
-            avg = f"{st['avg_return'] * 100:+.1f}%" if st["avg_return"] is not None else "—"
-            mark = f"{st['open_mark'] * 100:+.1f}%" if st["open_mark"] is not None else "—"
-            typer.echo(
-                f"shadow[{source}]: open {st['open']} (mark {mark})  "
-                f"closed {st['closed']}  hit {hit}  avg {avg}"
-            )
-        if entries:
-            typer.echo(f"\n{'symbol':<8} {'source':<12} {'reason':<20} {'entry':>8} {'mark':>7}")
-            for e in entries:
-                mark = f"{e.realized_return * 100:+.1f}%" if e.realized_return is not None else "—"
-                price = f"${e.entry_price:,.2f}" if e.entry_price else "—"
-                typer.echo(
-                    f"{e.symbol:<8} {e.source:<12} {e.skip_reason:<20} {price:>8} {mark:>7}"
-                )
-
-
 @app.command("prune")
 def prune() -> None:
-    """Prune old market data to keep the SQLite DB bounded (weekly on the Pi).
+    """Prune old market data to keep the SQLite DB bounded.
 
     Applies the RETENTION_* windows from settings to the broad, market-wide tables
     (insider / news / prices / confluence findings) and VACUUMs to reclaim space. A
-    window of 0 keeps everything for that source. Read-mostly and safe to run anytime;
-    routed through the shared run-lock by systemd so it never prunes mid-trade.
+    window of 0 keeps everything for that source.
     """
     from investment_monitor.storage.retention import RetentionConfig, prune_old_data
 
@@ -924,119 +392,6 @@ def prune() -> None:
     for table, n in sorted(deleted.items()):
         typer.echo(f"  {table:<22} {n:>8,} rows pruned")
     typer.echo(f"Prune complete ({sum(deleted.values()):,} rows removed).")
-
-
-@app.command("init")
-def init(
-    config: Path = typer.Option(None, "--config", "-c", help="Config directory"),
-    non_interactive: bool = typer.Option(
-        False, "--non-interactive", help="Scaffold files with defaults; ask nothing"
-    ),
-) -> None:
-    """Onboarding wizard: write .env (0600) + config/robo.yaml, dry-run forced ON.
-
-    Safe to re-run — existing values become the defaults. This NEVER arms live
-    trading: it forces ROBO_FORCE_DRY_RUN=true and robo.yaml dry_run:true. Flip both
-    only after reviewing a dry-run cycle (see the printed go-live checklist).
-    """
-    from investment_monitor.robo.onboarding import parse_env, set_yaml_scalar, upsert_env
-
-    # Anchor .env to $FW_HOME when set (the installer and systemd units run the app from
-    # there, and that is where pydantic reads .env at runtime), else the current dir.
-    # Without this, a `sudo -u` install would write .env to the caller's CWD (e.g. /root)
-    # where the services never read it.
-    root = Path(os.environ["FW_HOME"]) if os.environ.get("FW_HOME") else Path.cwd()
-    env_path = root / ".env"
-    env_example = root / ".env.example"
-    cfg_dir = Path(config) if config else get_settings().config_dir
-    yaml_path = cfg_dir / "robo.yaml"
-    yaml_example = cfg_dir / "robo.yaml.example"
-
-    # 1) Seed .env from the example if it doesn't exist yet (owner-only from birth).
-    if not env_path.exists():
-        env_path.write_text(env_example.read_text() if env_example.exists() else "")
-        os.chmod(env_path, 0o600)
-    existing = parse_env(env_path.read_text())
-
-    def ask(key: str, prompt: str, *, secret: bool = False, required: bool = False) -> str:
-        cur = existing.get(key, "")
-        if non_interactive:
-            return cur
-        shown = "********" if (secret and cur) else cur
-        val = typer.prompt(prompt, default=shown, show_default=bool(shown))
-        if secret and val == "********":  # kept the masked existing secret
-            return cur
-        val = val.strip()
-        if required and not val:
-            typer.secho(f"{key} is required to run the robo advisor.", fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-        return val
-
-    updates: dict[str, str] = {}
-    updates["PUBLIC_API_TOKEN"] = ask(
-        "PUBLIC_API_TOKEN", "Public.com API token", secret=True, required=not non_interactive
-    )
-    updates["SEC_CONTACT_EMAIL"] = ask("SEC_CONTACT_EMAIL", "Your email (SEC EDGAR contact)")
-    updates["SMTP_HOST"] = ask("SMTP_HOST", "SMTP host for email (blank = no email)")
-    if updates["SMTP_HOST"]:
-        updates["SMTP_PORT"] = ask("SMTP_PORT", "SMTP port") or "587"
-        updates["SMTP_USERNAME"] = ask("SMTP_USERNAME", "SMTP username")
-        updates["SMTP_PASSWORD"] = ask("SMTP_PASSWORD", "SMTP / app password", secret=True)
-        updates["EMAIL_FROM"] = ask("EMAIL_FROM", "From address") or updates["SMTP_USERNAME"]
-        updates["EMAIL_TO"] = ask("EMAIL_TO", "Send summaries/alerts to")
-    updates["ANTHROPIC_API_KEY"] = ask(
-        "ANTHROPIC_API_KEY", "Anthropic API key (optional; blank = local models only)", secret=True
-    )
-    updates["ROBO_FORCE_DRY_RUN"] = "true"  # safety: never arm live trading at init.
-
-    env_path.write_text(upsert_env(env_path.read_text(), updates))
-    os.chmod(env_path, 0o600)
-    typer.secho(f"Wrote {env_path} (permissions 0600).", fg=typer.colors.GREEN)
-
-    # 2) Seed robo.yaml from the example and force dry_run on.
-    if not yaml_path.exists():
-        yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        yaml_path.write_text(
-            yaml_example.read_text()
-            if yaml_example.exists()
-            else 'mode: advisory\ndry_run: true\naccount_id: ""\n'
-        )
-    ytext = set_yaml_scalar(yaml_path.read_text(), "dry_run", "true")
-
-    # 3) Discover the CASH account with the just-entered token (best-effort).
-    if updates.get("PUBLIC_API_TOKEN"):
-        try:
-            broker = PublicBroker(
-                api_token=updates["PUBLIC_API_TOKEN"],
-                base_url=existing.get("PUBLIC_API_BASE_URL", ""),
-                dry_run=True,
-            )
-            cash = [a for a in broker.list_accounts() if a.get("is_cash")]
-            if cash:
-                ytext = set_yaml_scalar(ytext, "account_id", f'"{cash[0]["account_id"]}"')
-                typer.secho(f"Configured CASH account {cash[0]['account_id']}.", fg=typer.colors.GREEN)
-            else:
-                typer.secho(
-                    "No CASH account found — set account_id manually; the robo requires one.",
-                    fg=typer.colors.YELLOW,
-                )
-        except Exception as exc:  # noqa: BLE001 - discovery is best-effort at onboarding.
-            typer.secho(
-                f"Couldn't list accounts ({exc}). Set account_id later via `investment-robo accounts`.",
-                fg=typer.colors.YELLOW,
-            )
-    yaml_path.write_text(ytext)
-    typer.secho(f"Wrote {yaml_path} (dry_run: true).", fg=typer.colors.GREEN)
-
-    typer.echo(
-        "\nNext:\n"
-        "  1. Pull the models:  ollama pull phi3:mini nomic-embed-text qwen2.5:14b\n"
-        "  2. Verify email:     investment-robo notify-test\n"
-        "  3. Dry-run a cycle:  investment-robo thesis-run --discover --no-trade\n"
-        "  4. Confirm the account is cash-only:  investment-robo check-safety\n"
-        "  GO LIVE (only when ready): set ROBO_FORCE_DRY_RUN=false in .env AND dry_run: false\n"
-        "  in config/robo.yaml — both are required to place real orders."
-    )
 
 
 def main() -> None:

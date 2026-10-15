@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import AlertSent, EarningsDate, InsiderTransaction, NewsItem, Price
+from .models import InsiderTransaction, NewsItem, Price
 
 
 # Price operations
@@ -133,60 +133,5 @@ def get_recent_news(
 
 
 # Alert operations
-def save_alert(session: Session, alert: AlertSent) -> int:
-    """Save an alert record, returning its ID."""
-    session.add(alert)
-    session.flush()
-    return alert.id
-
-
-def get_recent_alerts(
-    session: Session, hours: int = 24, alert_type: str | None = None
-) -> list[AlertSent]:
-    """Get recently sent alerts."""
-    cutoff = datetime.now() - timedelta(hours=hours)
-    stmt = select(AlertSent).where(AlertSent.sent_at >= cutoff)
-    if alert_type:
-        stmt = stmt.where(AlertSent.alert_type == alert_type)
-    stmt = stmt.order_by(AlertSent.sent_at.desc())
-    return list(session.scalars(stmt))
-
-
-def alert_exists_by_dedup_key(
-    session: Session, dedup_key: str, hours: int = 24
-) -> bool:
-    """Check if an alert with this dedup key was sent recently."""
-    cutoff = datetime.now() - timedelta(hours=hours)
-    stmt = select(AlertSent.id).where(
-        AlertSent.dedup_key == dedup_key, AlertSent.sent_at >= cutoff
-    )
-    return session.scalar(stmt) is not None
-
-
 # Earnings operations
-def save_earnings_date(session: Session, earnings: EarningsDate) -> int:
-    """Save an earnings date, returning its ID."""
-    session.add(earnings)
-    session.flush()
-    return earnings.id
-
-
-def get_upcoming_earnings(
-    session: Session, tickers: list[str], days_ahead: int = 14
-) -> list[EarningsDate]:
-    """Get upcoming earnings dates for given tickers."""
-    today = date.today()
-    cutoff = today + timedelta(days=days_ahead)
-    stmt = (
-        select(EarningsDate)
-        .where(
-            EarningsDate.ticker.in_(tickers),
-            EarningsDate.earnings_date >= today,
-            EarningsDate.earnings_date <= cutoff,
-        )
-        .order_by(EarningsDate.earnings_date)
-    )
-    return list(session.scalars(stmt))
-
-
 # ETF operations

@@ -3,7 +3,6 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Boolean,
     Date,
     DateTime,
     Float,
@@ -88,41 +87,5 @@ class NewsItem(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
-
-
-class AlertSent(Base):
-    """Record of alerts that have been sent."""
-
-    __tablename__ = "alerts_sent"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    alert_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    priority: Mapped[str] = mapped_column(String(20), nullable=False)
-    sent_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    channel: Mapped[str] = mapped_column(String(50), nullable=False)
-    dedup_key: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
-
-
-class EarningsDate(Base):
-    """Upcoming earnings dates."""
-
-    __tablename__ = "earnings_dates"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
-    earnings_date: Mapped[date] = mapped_column(Date, nullable=False)
-    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (UniqueConstraint("ticker", "earnings_date", name="uq_earnings_ticker_date"),)
 
 

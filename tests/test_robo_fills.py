@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from investment_monitor.robo.broker import fill_from_order_raw
-from investment_monitor.robo.rebalance import _apply_fill, _reconcile_order_fills
+from investment_monitor.robo.fills import apply_fill, reconcile_order_fills
 from investment_monitor.storage import (
     RoboOrder,
     get_filled_robo_orders,
@@ -61,7 +61,7 @@ class _Row:
 
 def test_apply_fill_filled_sets_fields():
     r = _Row()
-    terminal = _apply_fill(r, {"average_price": Decimal("100"), "filled_quantity": Decimal("2"),
+    terminal = apply_fill(r, {"average_price": Decimal("100"), "filled_quantity": Decimal("2"),
                                "status": "FILLED", "terminal": True})
     assert terminal is True
     assert r.fill_price == 100.0 and r.fill_quantity == 2.0 and r.fill_status == "FILLED"
@@ -69,14 +69,14 @@ def test_apply_fill_filled_sets_fields():
 
 def test_apply_fill_rejected_no_price():
     r = _Row()
-    terminal = _apply_fill(r, {"average_price": None, "status": "REJECTED", "terminal": True})
+    terminal = apply_fill(r, {"average_price": None, "status": "REJECTED", "terminal": True})
     assert terminal is True and r.fill_price is None and r.fill_quantity == 0.0
     assert r.fill_status == "REJECTED"
 
 
 def test_apply_fill_working_is_not_terminal():
     r = _Row()
-    assert _apply_fill(r, {"average_price": None, "status": "NEW", "terminal": False}) is False
+    assert apply_fill(r, {"average_price": None, "status": "NEW", "terminal": False}) is False
     assert r.fill_status is None
 
 
@@ -85,7 +85,7 @@ def test_apply_fill_partial_records_progress_but_keeps_polling():
     # NOT terminal — fill_status must stay NULL so get_unfilled_placed_orders keeps
     # polling it and the remaining shares are reconciled on a later run.
     r = _Row()
-    terminal = _apply_fill(
+    terminal = apply_fill(
         r,
         {"average_price": Decimal("99.50"), "filled_quantity": Decimal("3"),
          "status": "PARTIALLY_FILLED", "terminal": False},
@@ -108,7 +108,7 @@ def test_partial_fill_stays_unreconciled_then_completes(tmp_path):
         {"o1": {"status": "PARTIALLY_FILLED", "filledQuantity": "3", "averagePrice": "99.50"}}
     )
     with get_session() as s:
-        _reconcile_order_fills(s, partial)
+        reconcile_order_fills(s, partial)
     with get_session() as s:
         still = get_unfilled_placed_orders(s)
         assert [r.broker_order_id for r in still] == ["o1"]  # remainder still polled
@@ -119,7 +119,7 @@ def test_partial_fill_stays_unreconciled_then_completes(tmp_path):
         {"o1": {"status": "FILLED", "filledQuantity": "10", "averagePrice": "100.00"}}
     )
     with get_session() as s:
-        _reconcile_order_fills(s, full)
+        reconcile_order_fills(s, full)
     with get_session() as s:
         assert get_unfilled_placed_orders(s) == []  # now resolved
         o = get_robo_orders_for_run(s, "r1")[0]
@@ -146,7 +146,7 @@ def test_reconcile_order_fills_is_skipped_in_dry_run(tmp_path):
 
     broker = _SpyBroker()
     with get_session() as s:
-        _reconcile_order_fills(s, broker)
+        reconcile_order_fills(s, broker)
     assert broker.get_order_calls == 0  # never touched the live broker in dry-run
     with get_session() as s:
         assert len(get_unfilled_placed_orders(s)) == 1  # left for the next live run
@@ -222,7 +222,7 @@ def test_reconcile_order_fills_backfills(tmp_path):
         save_robo_order(s, _placed_order(oid="o1"))
     broker = _FakeBroker({"o1": {"status": "FILLED", "filledQuantity": "1", "averagePrice": "500.25"}})
     with get_session() as s:
-        _reconcile_order_fills(s, broker)
+        reconcile_order_fills(s, broker)
     with get_session() as s:
         assert get_unfilled_placed_orders(s) == []  # resolved
         o = get_robo_orders_for_run(s, "r1")[0]
@@ -268,6 +268,6 @@ def test_reconcile_order_fills_is_fail_open(tmp_path):
             raise RuntimeError("network down")
 
     with get_session() as s:
-        _reconcile_order_fills(s, _BadBroker())  # must not raise
+        reconcile_order_fills(s, _BadBroker())  # must not raise
     with get_session() as s:
         assert len(get_unfilled_placed_orders(s)) == 1  # left pending for a later retry

@@ -114,18 +114,6 @@ def _collect_broad(args: argparse.Namespace, log_level: str) -> int:
     except Exception as e:  # noqa: BLE001 - sentiment must not fail collection
         print(f"sentiment labeling warning: {e}", file=sys.stderr)
 
-    # After collecting, detect cross-source confluence and promote the strongest
-    # findings to theses so the autonomous advisor trades them.
-    try:
-        from investment_monitor.robo.confluence_promotion import run_insight_promotion
-
-        outcome = run_insight_promotion()
-        if not args.quiet:
-            promoted = ", ".join(outcome["promoted"]) or "(none)"
-            print(f"insights: {outcome['findings']} findings; "
-                  f"promoted {len(outcome['promoted'])} to theses: {promoted}")
-    except Exception as e:  # noqa: BLE001 - insight pipeline must not fail collection
-        print(f"insight pipeline warning: {e}", file=sys.stderr)
     return 0 if all(r.success for r in results) else 1
 
 

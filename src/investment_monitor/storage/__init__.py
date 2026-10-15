@@ -2,28 +2,21 @@
 
 from .database import get_session, init_db
 from .models import (
-    AlertSent,
     Base,
-    EarningsDate,
     InsiderTransaction,
     NewsItem,
     Price,
 )
 from .operations import (
-    alert_exists_by_dedup_key,
     get_insider_transactions,
     get_latest_price,
     get_prices,
-    get_recent_alerts,
     get_recent_news,
-    get_upcoming_earnings,
     get_unclassified_news,
     get_unscored_news,
     insider_transaction_exists,
     news_exists,
     price_exists,
-    save_alert,
-    save_earnings_date,
     save_insider_transaction,
     save_news_item,
     save_price,
@@ -61,57 +54,8 @@ from .robo_operations import (
     save_robo_order,
     save_robo_run,
 )
-from .thesis_models import LIVE_THESIS_STATUSES, Thesis, ThesisStatus
-from .thesis_operations import (
-    bench_thesis,
-    exit_thesis,
-    get_active_symbols,
-    get_active_theses,
-    get_all_theses,
-    get_last_exited_thesis,
-    get_thesis,
-    invalidate_thesis,
-    record_conviction_update,
-    save_thesis,
-    set_target_weight,
-    update_high_water,
-)
-from .learning_models import (
-    LEARNING_KIND_ACCURACY_MODIFIER,
-    LEARNING_KIND_OUTCOME,
-    LEARNING_KIND_SHADOW_OUTCOME,
-    LEARNING_KIND_WEIGHT_ADAPTATION,
-    LearningEvent,
-)
-from .learning_operations import (
-    accuracy_stats_for_symbol,
-    get_outcome_symbols,
-    get_recent_outcomes,
-    outcome_exists_for_date,
-    outcome_metrics,
-    record_learning_event,
-    record_thesis_outcome,
-)
 from .event_models import SIGNAL_ITEM_CODES, MaterialEvent
 from .event_operations import get_material_events, material_event_exists
-from .shadow_models import (
-    SHADOW_SOURCE_CONFLUENCE,
-    SHADOW_SOURCE_DISCOVERY,
-    SHADOW_SOURCE_GATE,
-    SHADOW_STATUS_CLOSED,
-    SHADOW_STATUS_OPEN,
-    ShadowEntry,
-)
-from .shadow_operations import (
-    close_shadow_entry,
-    get_open_shadow_entries,
-    get_shadow_entries,
-    has_open_shadow,
-    mark_shadow_entry,
-    record_shadow_entry,
-    shadow_ref_ids,
-    shadow_summary,
-)
 from .insight_models import (
     FINDING_CONGRESS_CLUSTER,
     FINDING_INSIDER_CLUSTER,
@@ -134,8 +78,6 @@ __all__ = [
     "Price",
     "InsiderTransaction",
     "NewsItem",
-    "AlertSent",
-    "EarningsDate",
     "ETFHolding",
     # Core operations
     "save_price",
@@ -151,11 +93,6 @@ __all__ = [
     "get_unscored_news",
     "get_unclassified_news",
     "get_recent_news",
-    "save_alert",
-    "get_recent_alerts",
-    "alert_exists_by_dedup_key",
-    "save_earnings_date",
-    "get_upcoming_earnings",
     "save_etf_holdings",
     "get_etf_holdings",
     # Research models
@@ -198,55 +135,11 @@ __all__ = [
     "get_filled_robo_orders",
     "get_unfilled_placed_orders",
     "count_placed_orders_today",
-    # Thesis store (autonomous investor)
-    "Thesis",
-    "ThesisStatus",
-    "LIVE_THESIS_STATUSES",
-    "get_active_theses",
-    "get_all_theses",
-    "get_thesis",
-    "save_thesis",
-    "record_conviction_update",
-    "set_target_weight",
-    "invalidate_thesis",
-    "exit_thesis",
-    "bench_thesis",
-    "update_high_water",
-    "get_last_exited_thesis",
-    "get_active_symbols",
-    # Learning / feedback ledger (Phase 6)
-    "LearningEvent",
-    "LEARNING_KIND_OUTCOME",
-    "LEARNING_KIND_ACCURACY_MODIFIER",
-    "LEARNING_KIND_SHADOW_OUTCOME",
-    "LEARNING_KIND_WEIGHT_ADAPTATION",
-    "record_learning_event",
-    "record_thesis_outcome",
-    "get_recent_outcomes",
-    "get_outcome_symbols",
-    "outcome_exists_for_date",
-    "accuracy_stats_for_symbol",
-    "outcome_metrics",
     # Material corporate events (SEC 8-K)
     "MaterialEvent",
     "SIGNAL_ITEM_CODES",
     "material_event_exists",
     "get_material_events",
-    # Shadow ledger (considered-but-not-traded theses)
-    "ShadowEntry",
-    "SHADOW_SOURCE_CONFLUENCE",
-    "SHADOW_SOURCE_DISCOVERY",
-    "SHADOW_SOURCE_GATE",
-    "SHADOW_STATUS_OPEN",
-    "SHADOW_STATUS_CLOSED",
-    "record_shadow_entry",
-    "has_open_shadow",
-    "shadow_ref_ids",
-    "get_open_shadow_entries",
-    "get_shadow_entries",
-    "mark_shadow_entry",
-    "close_shadow_entry",
-    "shadow_summary",
     # Confluence / insight engine
     "ConfluenceFinding",
     "FINDING_INSIDER_CLUSTER",

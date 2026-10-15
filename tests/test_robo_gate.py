@@ -103,39 +103,6 @@ def test_buy_still_capped_by_max_order_pct():
     assert not d.accepted and d.code == "exceeds_max_order_pct"
 
 
-def test_cash_etf_exempt_from_position_cap():
-    # At the position cap, a new real name is blocked but the cash ETF (a cash equivalent)
-    # is not — parking cash must never crowd out or be crowded out by a real holding.
-    positions = [Position(symbol=s, quantity=Decimal("0.1"), price=Decimal("100")) for s in ("AAA", "BBB")]
-    acct = make_account(settled_cash="1000", positions=positions)
-    base = make_config(allowlist=["AAA", "BBB", "NEW", "SGOV"], max_order_pct=0.9)
-    cfg = base.model_copy(update={
-        "cash_etf": "SGOV",
-        "caps": base.caps.model_copy(update={"max_positions": 2}),
-    })
-    # A new real name at the cap -> rejected.
-    d_real = validate(buy("NEW", notional="10"), acct, cfg, price=Decimal("100"))
-    assert not d_real.accepted and d_real.code == "max_positions"
-    # The cash ETF -> allowed despite being at the cap.
-    d_etf = validate(buy("SGOV", notional="10"), acct, cfg, price=Decimal("100"))
-    assert d_etf.accepted, d_etf.reason
-
-
-def test_cash_etf_exempt_from_per_name_weight_cap():
-    # The cash ETF must hold the whole cash sleeve, which can exceed a single-equity cap.
-    acct = make_account(settled_cash="1000")
-    cfg = make_config(allowlist=["VOO", "SGOV"], max_order_pct=0.9).model_copy(update={
-        "cash_etf": "SGOV",
-        "caps": make_config().caps.model_copy(update={"max_per_name_weight": 0.35, "max_order_pct": 0.9}),
-    })
-    # A big SGOV buy (>35% of the book) is allowed...
-    d_etf = validate(buy("SGOV", notional="500"), acct, cfg, price=Decimal("100"))
-    assert d_etf.accepted, d_etf.reason
-    # ...but a real name over the cap is still rejected.
-    d_real = validate(buy("VOO", notional="500"), acct, cfg, price=Decimal("100"))
-    assert not d_real.accepted and d_real.code == "exceeds_per_name_cap"
-
-
 # --------------------------------------------------------------------------- #
 # Acceptance
 # --------------------------------------------------------------------------- #

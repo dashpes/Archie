@@ -57,8 +57,7 @@ class TestMain:
             "investment_monitor.broad_collect.run_broad_collection_sync",
             return_value=[_Result()],
         ), patch("investment_monitor.logging_config.setup_logging"), patch(
-            "investment_monitor.robo.confluence_promotion.run_insight_promotion",
-            return_value={"findings": 0, "promoted": []},
-        ), patch("investment_monitor.analysis.news_processor.classify_unscored_sentiment"):
+            "investment_monitor.analysis.news_processor.classify_unscored_sentiment"
+        ):
             assert main(["-t", "collect-broad", "--days-back", "2"]) == 1
         assert "insider: failed" in capsys.readouterr().out

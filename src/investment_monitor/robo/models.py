@@ -11,7 +11,7 @@ drift in affordability math.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -254,3 +254,30 @@ class RunCounters(BaseModel):
 
     orders_this_run: int = 0
     orders_today: int = 0
+
+
+@dataclass
+class RebalanceResult:
+    """Summary of one rebalance run, returned to the CLI."""
+
+    run_id: str
+    dry_run: bool
+    source: str = "deterministic"
+    status: str = "completed"
+    account_id: str = ""
+    total_value: Decimal = Decimal("0")
+    settled_cash: Decimal = Decimal("0")
+    num_proposed: int = 0
+    num_accepted: int = 0
+    num_rejected: int = 0
+    num_placed: int = 0
+    decisions: list[GateDecision] = field(default_factory=list)
+    message: str = ""
+
+    def summary_line(self) -> str:
+        mode = "DRY-RUN" if self.dry_run else "LIVE"
+        return (
+            f"[{mode}] {self.status}: proposed={self.num_proposed} "
+            f"accepted={self.num_accepted} rejected={self.num_rejected} "
+            f"placed={self.num_placed} (source={self.source})"
+        )

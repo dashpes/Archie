@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from investment_monitor.robo import notify
-from investment_monitor.robo.rebalance import RebalanceResult
+from investment_monitor.robo.models import RebalanceResult
 
 
 def _settings(*, to="+15551234567", paper=False, smtp_host="", email_to=""):
@@ -47,38 +47,6 @@ def _account(**kw):
 
 
 # --- the "why": rationale snapshot + surfacing --------------------------------------
-def test_order_rationale_summarises_the_thesis():
-    from investment_monitor.robo.rebalance import _order_rationale
-
-    thesis = SimpleNamespace(id=7, conviction=0.78, narrative="Insider cluster: 3 insiders bought $937k")
-    assert _order_rationale(thesis) == "78% conviction — Insider cluster: 3 insiders bought $937k"
-    assert _order_rationale(None) == ""  # no owning thesis (rebalance / manual name)
-
-
-def test_daily_summary_shows_todays_trades_with_why():
-    trades = ["  Buy EML — $1.94", "      why: 78% conviction — Insider cluster"]
-    text = notify.format_daily_summary(_account(), None, trades)
-    assert "Today's trades:" in text
-    assert "Buy EML — $1.94" in text
-    assert "why: 78% conviction — Insider cluster" in text
-
-
-def test_todays_trade_lines_reads_rationale_from_db(tmp_path):
-    from investment_monitor.storage import RoboOrder, get_session, init_db, save_robo_order
-
-    db = tmp_path / "t.db"
-    init_db(db)
-    with get_session() as s:
-        save_robo_order(s, RoboOrder(
-            run_id="r1", symbol="EML", side="buy", order_type="market", notional=1.94,
-            source="deterministic", placed=True, status="placed",
-            rationale="78% conviction — Insider cluster: 3 insiders bought $937k",
-        ))
-    lines = notify.todays_trade_lines(SimpleNamespace(db_path=str(db)))
-    assert any("Buy EML" in line for line in lines)
-    assert any("why: 78% conviction — Insider cluster" in line for line in lines)
-
-
 # --- notify_run: trades ----------------------------------------------------------
 
 _ROWS = [
@@ -230,63 +198,7 @@ def _account():
     )
 
 
-def test_format_daily_summary_basics():
-    text = notify.format_daily_summary(_account())
-    assert "Portfolio value" in text and "$10,000.00" in text
-    assert "Cash available" in text and "$2,500.00" in text
-    assert "Unrealised P&L" in text and "-$165.00" in text  # British spelling
-    assert "%" in text  # pct shown because cost basis present
-    assert "📊" not in text  # professional, no emoji
-    # Archie's letterhead + sign-off (persona branding)
-    assert "ARCHIE" in text and "Yours faithfully,\nArchie" in text
-
-
-def test_format_daily_summary_movers_sorted_by_magnitude():
-    text = notify.format_daily_summary(_account())
-    lines = text.splitlines()
-    mover_lines = [ln.strip() for ln in lines if ln.startswith("  ")]
-    # Biggest absolute mover (TSLA -300) ranks above AAPL (+120) and MSFT (+15).
-    assert mover_lines[0].startswith("TSLA")
-    assert "NVDA" not in text  # position with no unrealized gain is excluded
-
-
-def test_format_daily_summary_with_realized():
-    realized = SimpleNamespace(total_realized=Decimal("54"))
-    text = notify.format_daily_summary(_account(), realized)
-    assert "Realised P&L" in text and "+$54.00" in text
-
-
-def test_send_daily_summary_uses_send():
-    captured = {}
-    with patch.object(notify, "_send", side_effect=lambda s, t, subject=None, html=None: captured.update(text=t, subject=subject) or True):
-        assert notify.send_daily_summary(_settings(), _account()) is True
-    assert "Daily Portfolio Summary" in captured["text"]
-    # Email subject is brand-prefixed and never the "ARCHIE" letterhead line.
-    assert captured["subject"].startswith("Archie · Daily Portfolio Summary")
-
-
 # --- HTML letter gatherers (hit a real DB; values must be read before detach) ------
-
-def test_html_gatherers_read_from_db(tmp_path):
-    from datetime import date, datetime, timedelta, timezone
-
-    from investment_monitor.storage import RoboRun, get_session, init_db
-    from investment_monitor.storage.learning_models import LearningEvent
-
-    db = tmp_path / "t.db"
-    init_db(db)
-    yesterday = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
-    with get_session() as s:
-        s.add(RoboRun(run_id="r0", dry_run=True, status="completed",
-                      total_value=100.0, started_at=yesterday))
-        s.add(LearningEvent(kind="thesis_outcome", symbol="EML",
-                            as_of_date=date.today(), direction_correct=1, brier=0.04))
-    settings = SimpleNamespace(db_path=str(db))
-
-    learning = notify._html_learning(settings)
-    assert learning == {"n": 1, "win_rate": 1.0, "brier": 0.04}
-    assert notify._prev_total_value(settings) == 100.0
-
 
 def test_send_test_uses_send():
     with patch.object(notify, "_send", return_value=True) as mock_send:

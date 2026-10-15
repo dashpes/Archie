@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 from investment_monitor.robo import control
-from investment_monitor.robo.rebalance import _resolve_dry_run
+from investment_monitor.robo.control import resolve_dry_run
 
 
 def _db(tmp_path):
@@ -67,45 +67,18 @@ def _config(dry_run=True):
 def test_control_force_dry_run_forces_paper(tmp_path):
     control.set_force_dry_run(_db(tmp_path), True)
     # Even a live config + explicit live override cannot escape the control force.
-    assert _resolve_dry_run(_config(dry_run=False), _settings(tmp_path), None) is True
-    assert _resolve_dry_run(_config(dry_run=False), _settings(tmp_path), False) is True
+    assert resolve_dry_run(_config(dry_run=False), _settings(tmp_path), None) is True
+    assert resolve_dry_run(_config(dry_run=False), _settings(tmp_path), False) is True
 
 
 def test_clearing_control_never_arms_live(tmp_path):
     control.set_force_dry_run(_db(tmp_path), False)
     # With the control layer clear, the other layers still decide.
-    assert _resolve_dry_run(_config(dry_run=True), _settings(tmp_path), None) is True
-    assert _resolve_dry_run(_config(dry_run=False), _settings(tmp_path, force=True), None) is True
+    assert resolve_dry_run(_config(dry_run=True), _settings(tmp_path), None) is True
+    assert resolve_dry_run(_config(dry_run=False), _settings(tmp_path, force=True), None) is True
     # Live only when env allows AND config permits.
-    assert _resolve_dry_run(_config(dry_run=False), _settings(tmp_path), None) is False
+    assert resolve_dry_run(_config(dry_run=False), _settings(tmp_path), None) is False
 
 
 # --- pause short-circuits a rebalance run --------------------------------------------
 
-def test_paused_run_persists_and_skips_broker(tmp_path):
-    from investment_monitor.robo.rebalance import rebalance_run
-    from investment_monitor.storage import get_session, init_db
-    from investment_monitor.storage.robo_models import RoboRun
-
-    control.set_paused(_db(tmp_path), True, reason="testing")
-
-    class ExplodingBroker:
-        dry_run = True
-
-        def get_account_state(self):
-            raise AssertionError("broker must not be touched while paused")
-
-    settings = SimpleNamespace(
-        robo_force_dry_run=True, db_path=str(_db(tmp_path)), log_dir=str(tmp_path / "logs")
-    )
-    config = SimpleNamespace(dry_run=True)
-    result = rebalance_run(config, settings, broker=ExplodingBroker())
-    assert result.status == "paused"
-    assert "paused" in result.message
-    assert "testing" in result.message
-
-    init_db(settings.db_path)
-    with get_session() as session:
-        runs = session.query(RoboRun).all()
-        assert len(runs) == 1
-        assert runs[0].status == "paused"

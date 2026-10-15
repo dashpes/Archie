@@ -1,9 +1,8 @@
 """Robo advisor: locally-run autonomous portfolio rebalancing.
 
-A cash-only, long-only robo advisor that uses a local LLM (Ollama) to *propose*
-trades and a deterministic guardrail gate to *dispose* of them. The LLM can never
-call the broker directly — every order passes through ``gate.validate`` and the
-broker's preflight before being placed (and only when ``DRY_RUN`` is False).
+A cash-only, long-only trading bot. Deterministic rules *propose* orders and the
+guardrail gate *disposes* of them. Every order passes through ``gate.validate`` and
+the broker's preflight before being placed (and only when ``DRY_RUN`` is False).
 
 Hard safety guarantees enforced in code (not left to the model):
   * cash account only (refuse to run if margin/borrowing is enabled)
