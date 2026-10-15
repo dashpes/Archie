@@ -83,7 +83,7 @@ def test_data_jobs_cover_every_source_and_are_unique():
     argv = " ".join(" ".join(j.argv) for j in jobs)
     for source in ("insider", "events", "prices", "news", "congress"):
         assert source in argv
-    assert {"label", "insights", "universe", "prune"} <= set(names)
+    assert {"label", "insights", "universe", "prune", "fundamentals", "score"} <= set(names)
 
 
 def test_research_commands_are_mounted():

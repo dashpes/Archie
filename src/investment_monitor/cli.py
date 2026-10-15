@@ -113,6 +113,43 @@ def universe() -> None:
 
 
 @app.command()
+def fundamentals() -> None:
+    """Fetch fundamentals for the stalest universe members (bounded per run)."""
+    from investment_monitor.research.discovery import refresh_fundamentals
+    from investment_monitor.research_cli import _load_research_config
+    from investment_monitor.storage import get_session, init_db
+
+    settings = get_settings()
+    init_db(settings.db_path)
+    cfg = _load_research_config(settings.config_dir)
+    with get_session() as session:
+        result = asyncio.run(refresh_fundamentals(session, settings, cfg))
+    typer.echo(f"fundamentals: refreshed {result.fetched}/{result.requested}")
+    for err in result.errors[:5]:
+        typer.echo(f"  - {err}")
+
+
+@app.command()
+def score() -> None:
+    """Score every universe member from stored data (no network)."""
+    from investment_monitor.research.discovery import score_universe
+    from investment_monitor.research_cli import _load_research_config
+    from investment_monitor.storage import get_session, init_db
+
+    settings = get_settings()
+    init_db(settings.db_path)
+    cfg = _load_research_config(settings.config_dir)
+    with get_session() as session:
+        result = score_universe(session, cfg)
+    typer.echo(
+        f"score: {result.scored} scored, {result.filtered} filtered, "
+        f"{result.no_snapshot} awaiting fundamentals (universe {result.universe})"
+    )
+    if result.top:
+        typer.echo("top: " + ", ".join(f"{t} {c:.0f}" for t, c in result.top[:10]))
+
+
+@app.command()
 def prune() -> None:
     """Delete rows older than the RETENTION_* windows (0 keeps everything) and VACUUM."""
     from investment_monitor.storage import get_session, init_db
@@ -152,6 +189,8 @@ def data_jobs() -> list:
         ),
         Job("label", py + ["label"], daily_at(7, 0, weekdays=MON_TO_SAT), timeout_s=1800),
         Job("insights", py + ["insights"], daily_at(7, 15, weekdays=MON_TO_SAT), timeout_s=600),
+        Job("fundamentals", py + ["fundamentals"], daily_at(5, 30, weekdays=MON_TO_SAT), timeout_s=3600),
+        Job("score", py + ["score"], daily_at(7, 30, weekdays=MON_TO_SAT), timeout_s=1800),
         Job("universe", py + ["universe"], weekly_at(6, 5, 0), timeout_s=1800),
         Job("prune", py + ["prune"], weekly_at(6, 4, 0), timeout_s=1800),
     ]

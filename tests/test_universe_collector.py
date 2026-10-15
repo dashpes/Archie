@@ -274,6 +274,42 @@ class TestCollectIndices:
         assert await collector.collect_single("SPY") == 0
 
 
+class TestUniverseMembership:
+    """A clean collect() marks present names current and absent names dropped."""
+
+    @pytest.mark.asyncio
+    async def test_collect_marks_dropped_members(self, tmp_path):
+        from investment_monitor.storage import StockCandidate, get_session, init_db
+
+        init_db(tmp_path / "u.db")
+        with get_session() as s:
+            s.add(StockCandidate(ticker="OLD", discovery_source="sp500", in_universe=True))
+        with get_session() as s:
+            collector = UniverseCollector(s, Settings(_env_file=None), collect_sp500=True, collect_nasdaq100=False)
+            with patch.object(collector, "collect_sp500", return_value=["AAPL", "OLD2"]):
+                result = await collector.collect([])
+        assert result.success
+        with get_session() as s:
+            flags = {c.ticker: c.in_universe for c in s.query(StockCandidate)}
+        assert flags == {"OLD": False, "AAPL": True, "OLD2": True}
+
+    @pytest.mark.asyncio
+    async def test_failed_collect_never_demotes(self, tmp_path):
+        from investment_monitor.storage import StockCandidate, get_session, init_db
+
+        init_db(tmp_path / "u.db")
+        with get_session() as s:
+            s.add(StockCandidate(ticker="OLD", discovery_source="sp500", in_universe=True))
+        with get_session() as s:
+            collector = UniverseCollector(s, Settings(_env_file=None), collect_sp500=True, collect_nasdaq100=True)
+            with patch.object(collector, "collect_sp500", return_value=["AAPL"]):
+                with patch.object(collector, "collect_nasdaq100", side_effect=RuntimeError("wiki 403")):
+                    result = await collector.collect([])
+        assert not result.success
+        with get_session() as s:
+            assert {c.ticker: c.in_universe for c in s.query(StockCandidate)} == {"OLD": True, "AAPL": True}
+
+
 class TestDeduplication:
     """Tests for ticker deduplication logic."""
 

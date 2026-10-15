@@ -44,15 +44,9 @@ class UniverseConfig(BaseModel):
 
 
 class ResearchThresholds(BaseModel):
-    """Score thresholds for automated actions.
-
-    Controls when stocks are automatically added to watchlist,
-    rejected, or require manual review.
-    """
+    """Score thresholds used by the research CLI's ``top`` listing."""
 
     min_composite_score: float = Field(default=60.0, ge=0, le=100)
-    auto_watchlist_score: float = Field(default=75.0, ge=0, le=100)
-    auto_reject_score: float = Field(default=30.0, ge=0, le=100)
 
 
 class ResearchConfig(BaseModel):
@@ -67,7 +61,9 @@ class ResearchConfig(BaseModel):
     scoring_weights: ScoringWeights = Field(default_factory=ScoringWeights)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
     thresholds: ResearchThresholds = Field(default_factory=ResearchThresholds)
-    discovery_batch_size: int = Field(default=50, ge=1, le=500)
+    # A snapshot older than this is refreshed; at most this many fetches per run.
+    fundamentals_max_age_days: int = Field(default=7, ge=1, le=90)
+    fundamentals_per_run: int = Field(default=150, ge=1, le=2000)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "ResearchConfig":

@@ -2,11 +2,12 @@
 
 This module provides CLI commands for stock research operations including:
 - Discovery pipeline execution
-- Viewing top candidates
+- Fundamentals refresh and universe scoring
+- Viewing top scores
 - Monte Carlo simulation for risk analysis
 
 Usage:
-    investment-data research discover [--dry-run]
+    investment-data research discover
     investment-data research top [--limit N] [--min-score N]
     investment-data research simulate --ticker TICKER [--force] [--horizons 30,90,252]
     investment-data research simulate --tickers AAPL,MSFT,GOOGL
@@ -27,16 +28,17 @@ import yfinance as yf
 
 from investment_monitor.config import get_settings
 from investment_monitor.models import ResearchConfig
-from investment_monitor.research.discovery import DiscoveryPipeline
+from investment_monitor.collectors.universe import UniverseCollector
+from investment_monitor.research.discovery import refresh_fundamentals, score_universe
 from investment_monitor.simulation.analyzer import MonteCarloAnalyzer
 from investment_monitor.simulation.models import SimulationConfig
 from investment_monitor.storage import (
-    get_high_scoring_candidates,
     get_session,
     get_simulation_results,
-    get_top_candidates,
     init_db,
+    latest_score,
     save_simulation_result,
+    top_scores,
 )
 
 app = typer.Typer(
@@ -55,70 +57,24 @@ def _load_research_config(config_dir: Path) -> ResearchConfig:
 
 
 @app.command()
-def discover(
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        "-n",
-        help="Run discovery without persisting changes",
-    ),
-) -> None:
-    """Run the discovery pipeline to find and score stock candidates.
-
-    The discovery pipeline:
-    1. Collects stock universe from S&P 500, NASDAQ 100, and ETFs
-    2. Applies filters (market cap, sectors)
-    3. Fetches fundamentals for candidates
-    4. Scores candidates using AI analysis
-    5. Identifies top candidates above threshold
-    6. Auto-adds high-scoring candidates to watchlist
-    """
+def discover() -> None:
+    """Refresh the universe, fetch stale fundamentals, and score every member."""
     try:
         settings = get_settings()
         init_db(settings.db_path)
         research_config = _load_research_config(settings.config_dir)
-
         with get_session() as session:
-            pipeline = DiscoveryPipeline(
-                session=session,
-                config=settings,
-                research_config=research_config,
-                ollama_model=settings.ollama_model,
-            )
-
-            if dry_run:
-                typer.echo("Running discovery pipeline in dry-run mode...")
-            else:
-                typer.echo("Running discovery pipeline...")
-
-            result = asyncio.run(pipeline.run_discovery(dry_run=dry_run))
-
-            # Display results
-            typer.echo("\n--- Discovery Results ---")
-            typer.echo(f"Total candidates: {result.total_candidates}")
-            typer.echo(f"Scored candidates: {result.scored_candidates}")
-            typer.echo(f"Top candidates: {len(result.top_candidates)}")
-            typer.echo(f"Watchlist additions: {len(result.watchlist_additions)}")
-            typer.echo(f"Duration: {result.duration_seconds:.1f}s")
-
-            if result.top_candidates:
-                typer.echo(f"\nTop candidates: {', '.join(result.top_candidates[:10])}")
-
-            if result.watchlist_additions:
-                typer.echo(
-                    f"Added to watchlist: {', '.join(result.watchlist_additions)}"
-                )
-
-            if result.errors:
-                typer.echo(f"\nErrors ({len(result.errors)}):")
-                for error in result.errors[:5]:
-                    typer.echo(f"  - {error}")
-                if len(result.errors) > 5:
-                    typer.echo(f"  ... and {len(result.errors) - 5} more")
-
-            if dry_run:
-                typer.echo("\n(Dry run - no changes persisted)")
-
+            universe = asyncio.run(UniverseCollector(session, settings).collect([]))
+            typer.echo(f"universe: {universe.records_collected} new members")
+            refreshed = asyncio.run(refresh_fundamentals(session, settings, research_config))
+            typer.echo(f"fundamentals: refreshed {refreshed.fetched}/{refreshed.requested}")
+            scored = score_universe(session, research_config)
+        typer.echo(
+            f"scores: {scored.scored} scored, {scored.filtered} filtered, "
+            f"{scored.no_snapshot} awaiting fundamentals (universe {scored.universe})"
+        )
+        if scored.top:
+            typer.echo("top: " + ", ".join(f"{t} {c:.0f}" for t, c in scored.top[:10]))
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
@@ -126,47 +82,30 @@ def discover(
 
 @app.command()
 def top(
-    limit: int = typer.Option(
-        20,
-        "--limit",
-        "-l",
-        help="Maximum number of candidates to show",
-    ),
-    min_score: Optional[float] = typer.Option(
-        None,
-        "--min-score",
-        "-s",
-        help="Minimum composite score threshold",
-    ),
+    limit: int = typer.Option(20, "--limit", "-l", help="Maximum number of candidates to show"),
+    min_score: Optional[float] = typer.Option(None, "--min-score", "-s", help="Minimum composite score"),
 ) -> None:
-    """Show top-scoring stock candidates.
-
-    Lists candidates ordered by composite score, optionally filtered
-    by minimum score.
-    """
+    """Show the top-scoring tickers (each ticker's newest score)."""
     try:
         settings = get_settings()
         init_db(settings.db_path)
-
         with get_session() as session:
-            candidates = get_top_candidates(
-                session, limit=limit, min_score=min_score
-            )
-
-            if not candidates:
-                typer.echo("No candidates found matching criteria.")
+            rows = top_scores(session, limit=limit, min_composite=min_score)
+            if not rows:
+                typer.echo("No scored tickers found matching criteria.")
                 return
+            typer.echo(f"\n--- Top Scores ({len(rows)}) ---")
+            typer.echo(f"{'#':<4} {'Ticker':<8} {'Score':>6} {'Val':>5} {'Gro':>5} {'Qua':>5} {'Mom':>5} {'Sen':>5}  as of")
+            typer.echo("-" * 62)
 
-            typer.echo(f"\n--- Top Candidates ({len(candidates)}) ---")
-            typer.echo(f"{'#':<4} {'Ticker':<10} {'Score':<10} {'Status':<12}")
-            typer.echo("-" * 40)
+            def _f(v):
+                return f"{v:5.0f}" if v is not None else "    -"
 
-            for i, candidate in enumerate(candidates, 1):
-                score = candidate.composite_score or 0
+            for i, r in enumerate(rows, 1):
                 typer.echo(
-                    f"{i:<4} {candidate.ticker:<10} {score:<10.1f} {candidate.status:<12}"
+                    f"{i:<4} {r.ticker:<8} {r.composite:6.1f} {_f(r.value)} {_f(r.growth)} "
+                    f"{_f(r.quality)} {_f(r.momentum)} {_f(r.sentiment)}  {r.as_of.isoformat()}"
                 )
-
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
@@ -230,8 +169,7 @@ def simulate(
             tickers_to_simulate.extend([t.strip().upper() for t in tickers.split(",")])
         elif auto:
             with get_session() as session:
-                candidates = get_high_scoring_candidates(session, min_score=80.0)
-                tickers_to_simulate.extend([c.ticker for c in candidates])
+                tickers_to_simulate.extend(r.ticker for r in top_scores(session, limit=50, min_composite=80.0))
                 if not tickers_to_simulate:
                     typer.echo("No high-scoring candidates found for auto-simulation.")
                     return
@@ -276,12 +214,8 @@ def simulate(
 
                 # Get composite score if available
                 with get_session() as session:
-                    from investment_monitor.storage import get_candidate_by_ticker
-
-                    candidate = get_candidate_by_ticker(session, t)
-                    composite_score = (
-                        candidate.composite_score if candidate else 0.0
-                    ) or 0.0
+                    row = latest_score(session, t)
+                    composite_score = (row.composite if row else 0.0) or 0.0
 
                 # Run simulation
                 typer.echo(f"  {t}: Simulating (price=${current_price:.2f})...")

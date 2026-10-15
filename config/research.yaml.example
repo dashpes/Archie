@@ -1,103 +1,27 @@
-# Research Configuration
-# This file configures the automated stock research system.
-# Copy this file to research.yaml and customize for your needs.
+# Research configuration. Copy to config/research.yaml and edit.
 
-# ==============================================================================
-# Scoring Weights
-# ==============================================================================
-# Weights for calculating composite investment scores.
-# Each weight must be between 0 and 1, and ALL weights must sum to exactly 1.0.
-# Adjust these to match your investment style:
-#   - Value investors: increase 'value' weight
-#   - Growth investors: increase 'growth' weight
-#   - Conservative investors: increase 'quality' weight
+# Weights for the composite score. Each is between 0 and 1 and they sum to 1.0.
+# A factor with no data is left out and the remaining weights are renormalised.
 scoring_weights:
-  # Weight for valuation metrics (P/E, P/B, P/S ratios)
-  value: 0.2
+  value: 0.2       # P/E, P/B, P/S, PEG
+  growth: 0.2      # revenue and EPS growth, 1y and 3y
+  quality: 0.2     # ROE, margin, debt/equity, current ratio, FCF yield
+  momentum: 0.2    # 3m/6m/1y change and distance from the 52-week high
+  sentiment: 0.2   # distinct insider buyers minus sellers, labeled-news ratio
 
-  # Weight for growth metrics (revenue growth, earnings growth)
-  growth: 0.2
-
-  # Weight for quality metrics (ROE, debt ratios, margins)
-  quality: 0.2
-
-  # Weight for price momentum (technical indicators, trends)
-  momentum: 0.2
-
-  # Weight for market sentiment (analyst ratings, news sentiment)
-  sentiment: 0.2
-
-# ==============================================================================
-# Universe Settings
-# ==============================================================================
-# Controls which stocks are included in the research universe.
+# Which stocks are scored. Filters apply after the fundamentals snapshot is read.
 universe:
-  # Include S&P 500 constituents in the screening universe
   include_sp500: true
-
-  # Include Nasdaq 100 constituents in the screening universe
   include_nasdaq100: true
-
-  # Minimum market capitalization in USD (filters out small caps)
-  # Default: 1 billion ($1,000,000,000)
-  min_market_cap: 1000000000
-
-  # Sectors to exclude from research (GICS sector names)
-  # Example: ["Energy", "Utilities", "Real Estate"]
-  excluded_sectors: []
-
-  # Specific tickers to exclude from research
-  # Example: ["XOM", "CVX", "COIN"]
+  min_market_cap: 1000000000   # $1B
+  excluded_sectors: []         # GICS names, e.g. ["Energy", "Utilities"]
   excluded_tickers: []
 
-# ==============================================================================
-# Research Thresholds
-# ==============================================================================
-# Score thresholds for automated actions on researched stocks.
-# All scores are on a 0-100 scale.
+# Floor for the `top` listing.
 thresholds:
-  # Minimum composite score required to consider a stock for research
-  # Stocks below this threshold are filtered out early
   min_composite_score: 60.0
 
-  # Score threshold for automatically adding to watchlist
-  # Stocks scoring at or above this are auto-added to watchlist
-  auto_watchlist_score: 75.0
-
-  # Score threshold for automatic rejection
-  # Stocks scoring at or below this are automatically rejected
-  auto_reject_score: 30.0
-
-# ==============================================================================
-# Discovery Settings
-# ==============================================================================
-# Number of stocks to process in each discovery batch
-# Higher values = faster discovery but more memory usage
-# Range: 1-500
-discovery_batch_size: 50
-
-# ==============================================================================
-# Monte Carlo Simulation Settings
-# ==============================================================================
-# Settings for probabilistic risk analysis of stock candidates.
-monte_carlo:
-  score_threshold: 80
-  horizons: [30, 90, 252]
-  min_paths: 1000
-  max_paths: 50000
-  ci_width_threshold: 0.15
-  min_lookback_days: 252
-  max_lookback_days: 1260
-  include_in_reports: true
-  disclaimer: "Simulation based on historical returns. Not a prediction."
-
-  scenarios:
-    base_gbm: true
-    crisis_2008: true
-    dotcom_crash: true
-    covid_crash: true
-    stagflation_1970s: true
-    black_monday_1987: true
-    rising_rates_2022: true
-    regime_democrat: true
-    regime_republican: true
+# Fundamentals refresh: a snapshot older than this is refetched, at most this
+# many fetches per run (about 600 names turn over in a week at 150/day).
+fundamentals_max_age_days: 7
+fundamentals_per_run: 150

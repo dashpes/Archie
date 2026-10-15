@@ -9,8 +9,6 @@ from sqlalchemy.orm import Session
 
 from investment_monitor.storage.models import Base
 from investment_monitor.storage.research_models import (
-    CANDIDATE_STATUSES,
-    CandidateScore,
     CongressionalTrade,
     StockCandidate,
 )
@@ -33,8 +31,7 @@ class TestStockCandidate:
         candidate = StockCandidate(
             ticker="AAPL",
             discovery_source="congressional_trades",
-            status="discovered",
-            composite_score=75.5,
+            in_universe=True,
             notes="Strong buy signals from multiple congress members",
         )
         db_session.add(candidate)
@@ -43,17 +40,6 @@ class TestStockCandidate:
         retrieved = db_session.query(StockCandidate).filter_by(ticker="AAPL").first()
         assert retrieved is not None
         assert retrieved.discovery_source == "congressional_trades"
-        assert retrieved.status == "discovered"
-        assert retrieved.composite_score == 75.5
-
-    def test_candidate_default_status(self, db_session):
-        """Test that default status is 'discovered'."""
-        candidate = StockCandidate(ticker="MSFT")
-        db_session.add(candidate)
-        db_session.commit()
-
-        retrieved = db_session.query(StockCandidate).filter_by(ticker="MSFT").first()
-        assert retrieved.status == "discovered"
 
     def test_candidate_unique_ticker_constraint(self, db_session):
         """Test that ticker must be unique."""
@@ -65,74 +51,6 @@ class TestStockCandidate:
         db_session.add(candidate2)
         with pytest.raises(IntegrityError):
             db_session.commit()
-
-    def test_candidate_valid_statuses(self):
-        """Test that valid statuses are defined correctly."""
-        expected = (
-            "discovered",
-            "screening",
-            "researched",
-            "watchlist",
-            "rejected",
-            "archived",
-        )
-        assert CANDIDATE_STATUSES == expected
-
-
-class TestCandidateScore:
-    """Tests for CandidateScore model."""
-
-    def test_create_score(self, db_session):
-        """Test creating a candidate score."""
-        score = CandidateScore(
-            ticker="AAPL",
-            value_score=80.0,
-            growth_score=75.0,
-            quality_score=85.0,
-            momentum_score=70.0,
-            sentiment_score=90.0,
-            composite_score=80.0,
-            reasoning="Strong fundamentals with positive momentum",
-        )
-        db_session.add(score)
-        db_session.commit()
-
-        retrieved = db_session.query(CandidateScore).filter_by(ticker="AAPL").first()
-        assert retrieved is not None
-        assert retrieved.value_score == 80.0
-        assert retrieved.growth_score == 75.0
-        assert retrieved.quality_score == 85.0
-        assert retrieved.momentum_score == 70.0
-        assert retrieved.sentiment_score == 90.0
-        assert retrieved.composite_score == 80.0
-
-    def test_score_unique_ticker_constraint(self, db_session):
-        """Test that ticker must be unique in scores."""
-        score1 = CandidateScore(ticker="NVDA", value_score=85.0)
-        db_session.add(score1)
-        db_session.commit()
-
-        score2 = CandidateScore(ticker="NVDA", value_score=90.0)
-        db_session.add(score2)
-        with pytest.raises(IntegrityError):
-            db_session.commit()
-
-    def test_score_range_values(self, db_session):
-        """Test that scores can be in 0-100 range."""
-        score = CandidateScore(
-            ticker="TSLA",
-            value_score=0.0,
-            growth_score=100.0,
-            quality_score=50.0,
-        )
-        db_session.add(score)
-        db_session.commit()
-
-        retrieved = db_session.query(CandidateScore).filter_by(ticker="TSLA").first()
-        assert retrieved.value_score == 0.0
-        assert retrieved.growth_score == 100.0
-        assert retrieved.quality_score == 50.0
-
 
 class TestCongressionalTrade:
     """Tests for CongressionalTrade model."""

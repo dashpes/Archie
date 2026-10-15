@@ -205,19 +205,6 @@ class TestResearchThresholds:
         """Test default values are sensible."""
         thresholds = ResearchThresholds()
         assert thresholds.min_composite_score == 60.0
-        assert thresholds.auto_watchlist_score == 75.0
-        assert thresholds.auto_reject_score == 30.0
-
-    def test_custom_values(self):
-        """Test custom values are accepted."""
-        thresholds = ResearchThresholds(
-            min_composite_score=50.0,
-            auto_watchlist_score=80.0,
-            auto_reject_score=25.0,
-        )
-        assert thresholds.min_composite_score == 50.0
-        assert thresholds.auto_watchlist_score == 80.0
-        assert thresholds.auto_reject_score == 25.0
 
     def test_negative_score_rejected(self):
         """Test that negative scores are rejected."""
@@ -227,23 +214,7 @@ class TestResearchThresholds:
     def test_score_over_100_rejected(self):
         """Test that scores over 100 are rejected."""
         with pytest.raises(ValueError):
-            ResearchThresholds(auto_watchlist_score=101.0)
-
-    def test_boundary_values(self):
-        """Test boundary values are accepted."""
-        thresholds = ResearchThresholds(
-            min_composite_score=0.0,
-            auto_watchlist_score=100.0,
-            auto_reject_score=0.0,
-        )
-        assert thresholds.min_composite_score == 0.0
-        assert thresholds.auto_watchlist_score == 100.0
-        assert thresholds.auto_reject_score == 0.0
-
-
-# ============================================================================
-# ClaudeBudgetConfig Tests
-# ============================================================================
+            ResearchThresholds(min_composite_score=101.0)
 
 
 # ============================================================================
@@ -260,32 +231,6 @@ class TestResearchConfig:
         assert config.scoring_weights.value == 0.2
         assert config.universe.include_sp500 is True
         assert config.thresholds.min_composite_score == 60.0
-        assert config.discovery_batch_size == 50
-
-    def test_custom_batch_size(self):
-        """Test custom batch size is accepted."""
-        config = ResearchConfig(discovery_batch_size=100)
-        assert config.discovery_batch_size == 100
-
-    def test_batch_size_minimum(self):
-        """Test batch size minimum of 1."""
-        config = ResearchConfig(discovery_batch_size=1)
-        assert config.discovery_batch_size == 1
-
-    def test_batch_size_maximum(self):
-        """Test batch size maximum of 500."""
-        config = ResearchConfig(discovery_batch_size=500)
-        assert config.discovery_batch_size == 500
-
-    def test_batch_size_below_minimum_rejected(self):
-        """Test that batch size below 1 is rejected."""
-        with pytest.raises(ValueError):
-            ResearchConfig(discovery_batch_size=0)
-
-    def test_batch_size_above_maximum_rejected(self):
-        """Test that batch size above 500 is rejected."""
-        with pytest.raises(ValueError):
-            ResearchConfig(discovery_batch_size=501)
 
     def test_partial_override(self):
         """Test that partial configuration merges with defaults."""
@@ -322,14 +267,11 @@ universe:
 
 thresholds:
   min_composite_score: 55.0
-  auto_watchlist_score: 80.0
-  auto_reject_score: 25.0
 
   enabled: true
   monthly_limit_usd: 75.0
   max_reports_per_day: 15
 
-discovery_batch_size: 75
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -353,13 +295,10 @@ discovery_batch_size: 75
 
             # Thresholds
             assert config.thresholds.min_composite_score == 55.0
-            assert config.thresholds.auto_watchlist_score == 80.0
-            assert config.thresholds.auto_reject_score == 25.0
 
             # Claude budget
 
             # Batch size
-            assert config.discovery_batch_size == 75
 
     def test_from_yaml_partial_config(self):
         """Test loading a partial configuration from YAML merges with defaults."""
@@ -387,7 +326,6 @@ thresholds:
             # Defaults for other sections
             assert config.universe.include_sp500 is True
             assert config.universe.min_market_cap == 1_000_000_000
-            assert config.discovery_batch_size == 50
 
     def test_from_yaml_empty_file(self):
         """Test loading from an empty YAML file uses all defaults."""
@@ -402,7 +340,6 @@ thresholds:
             assert config.scoring_weights.value == 0.2
             assert config.universe.include_sp500 is True
             assert config.thresholds.min_composite_score == 60.0
-            assert config.discovery_batch_size == 50
 
     def test_from_yaml_invalid_weights_rejected(self):
         """Test that invalid weights in YAML are rejected."""
@@ -484,10 +421,7 @@ universe:
 
         # Verify thresholds match model defaults
         assert config.thresholds.min_composite_score == 60.0
-        assert config.thresholds.auto_watchlist_score == 75.0
-        assert config.thresholds.auto_reject_score == 30.0
 
         # Verify claude budget settings match model defaults
 
         # Verify discovery batch size matches model default
-        assert config.discovery_batch_size == 50

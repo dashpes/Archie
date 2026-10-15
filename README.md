@@ -15,8 +15,9 @@ Archie is a two-part system that runs in Docker on a home server.
 | Senate eFD | Senate trade disclosures | Daily, 06:30 ET |
 | RSS | Market-wide headlines with cashtags | Hourly |
 | Wikipedia | S&P 500 and Nasdaq-100 membership | Sunday, 05:00 ET |
+| Yahoo Finance | Fundamentals for the stalest universe members, 150 per run | Daily, 05:30 ET |
 
-After the daily collection, the service labels new headlines bullish, bearish, or neutral with a local LLM, then runs the confluence detector. Retention runs on Sunday at 04:00 ET.
+After the daily collection, the service labels new headlines bullish, bearish, or neutral, runs the confluence detector, and scores every universe member from stored data. Scores are numeric and deterministic: five factors mapped through fixed bands, then a weighted mean. Retention runs on Sunday at 04:00 ET.
 
 ## Install
 
@@ -52,6 +53,9 @@ docker compose exec data investment-data collect --days-back 3
 docker compose exec data investment-data label
 docker compose exec data investment-data insights
 docker compose exec data investment-data universe
+docker compose exec data investment-data fundamentals
+docker compose exec data investment-data score
+docker compose exec data investment-data research top
 docker compose exec data investment-data prune
 ```
 

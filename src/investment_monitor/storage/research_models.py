@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -20,16 +21,6 @@ from sqlalchemy.sql import func
 from .models import Base
 
 
-# Valid statuses for StockCandidate
-CANDIDATE_STATUSES = (
-    "discovered",
-    "screening",
-    "researched",
-    "watchlist",
-    "rejected",
-    "archived",
-)
-
 
 class StockCandidate(Base):
     """Stock candidates discovered for research."""
@@ -39,10 +30,8 @@ class StockCandidate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     discovery_source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="discovered", index=True
-    )
-    composite_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # True while the ticker is a current index member; False once it drops out.
+    in_universe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
@@ -53,34 +42,6 @@ class StockCandidate(Base):
 
     __table_args__ = (
         UniqueConstraint("ticker", name="uq_stock_candidate_ticker"),
-        Index("ix_stock_candidate_status", "status"),
-    )
-
-
-class CandidateScore(Base):
-    """Factor scores for a stock candidate."""
-
-    __tablename__ = "candidate_scores"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
-    value_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    growth_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    momentum_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sentiment_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    composite_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint("ticker", name="uq_candidate_score_ticker"),
-        Index("ix_candidate_score_ticker", "ticker"),
     )
 
 

@@ -19,12 +19,15 @@ from investment_monitor.collectors.material_events import MaterialEventsCollecto
 from investment_monitor.collectors.news import NewsCollector
 from investment_monitor.collectors.prices import PriceCollector
 from investment_monitor.config import Settings, get_settings
-from investment_monitor.storage import get_session, init_db
+from investment_monitor.storage import get_session, get_universe_tickers, init_db
 
-# Price collection is bounded to the insider-active universe (the names confluence
-# cares about) and capped so the daily run stays fast.
+# Prices cover the research universe plus insider-active names (capped), fetched
+# incrementally; a name with thin history is backfilled two years so momentum
+# and the 52-week level are real.
 _PRICE_WINDOW_DAYS = 30
 _PRICE_MAX_TICKERS = 500
+_PRICE_INCREMENTAL_DAYS = 5
+_PRICE_BACKFILL_DAYS = 730
 
 # Order matters: insider first (it defines the relevant universe), then prices for
 # that universe, then market-wide news and congress.
@@ -45,8 +48,12 @@ async def collect_source(
                 days_back=days_back, limit=limit
             )
         if name == "prices":
-            return await PriceCollector(session, settings).collect_all(
-                window_days=_PRICE_WINDOW_DAYS, max_tickers=_PRICE_MAX_TICKERS
+            collector = PriceCollector(session, settings, days_to_fetch=_PRICE_INCREMENTAL_DAYS)
+            return await collector.collect_all(
+                window_days=_PRICE_WINDOW_DAYS,
+                max_tickers=_PRICE_MAX_TICKERS,
+                extra_tickers=get_universe_tickers(session),
+                backfill_days=_PRICE_BACKFILL_DAYS,
             )
         if name == "news":
             return await NewsCollector(session, settings).collect_all()

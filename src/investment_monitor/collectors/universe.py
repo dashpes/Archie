@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import Settings
-from ..storage import StockCandidate, get_candidate_by_ticker, save_candidate
+from ..storage import StockCandidate, get_candidate_by_ticker, mark_universe, save_candidate
 from .base import BaseCollector, CollectorResult
 
 
@@ -287,14 +287,13 @@ class UniverseCollector(BaseCollector):
                 existing = get_candidate_by_ticker(self.session, ticker)
 
                 if existing:
-                    logger.debug(f"Ticker {ticker} already exists, skipping")
+                    existing.in_universe = True
                     continue
 
-                # Create new candidate
                 candidate = StockCandidate(
                     ticker=ticker,
                     discovery_source=source,
-                    status="discovered",
+                    in_universe=True,
                 )
                 save_candidate(self.session, candidate)
                 records_saved += 1
@@ -349,6 +348,13 @@ class UniverseCollector(BaseCollector):
                 error_msg = f"NASDAQ 100 collection failed: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
+
+        # Only a clean, complete pass may demote absent names: a failed index scrape
+        # must not mark half the universe as dropped.
+        if all_tickers and not errors:
+            dropped = mark_universe(self.session, set(all_tickers))
+            if dropped:
+                logger.info(f"{self.name}: universe membership updated for {dropped} tickers")
 
         # Commit all changes
         try:

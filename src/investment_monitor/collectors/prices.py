@@ -89,7 +89,13 @@ class PriceCollector(BaseCollector):
     # Broad, universe-independent collection (confluence-relevant tickers only)
     # ----------------------------------------------------------------------- #
     async def collect_all(
-        self, *, window_days: int = 30, max_tickers: int | None = None
+        self,
+        *,
+        window_days: int = 30,
+        max_tickers: int | None = None,
+        extra_tickers: list[str] | None = None,
+        backfill_days: int = 0,
+        backfill_min_rows: int = 400,
     ) -> CollectorResult:
         """Collect daily OHLCV for the CONFLUENCE-RELEVANT universe (broad collection).
 
@@ -105,7 +111,11 @@ class PriceCollector(BaseCollector):
 
         Args:
             window_days: insider trade_date lookback that defines the relevant universe.
-            max_tickers: optional cap on the number of tickers fetched this run.
+            max_tickers: optional cap on the number of insider-active tickers this run.
+            extra_tickers: names always included (the research universe, held names).
+            backfill_days: when > 0, tickers with fewer than ``backfill_min_rows``
+                stored rows are fetched over this many days instead of the
+                incremental ``days_to_fetch`` window.
         """
         started_at = datetime.now()
         records_collected = 0
@@ -116,6 +126,8 @@ class PriceCollector(BaseCollector):
             f"{self.name}: {len(tickers)} confluence-relevant tickers to price "
             f"(insider trades within {window_days}d)"
         )
+        if extra_tickers:
+            tickers = sorted({t.upper() for t in tickers} | {t.upper() for t in extra_tickers})
 
         if not tickers:
             return CollectorResult(
@@ -130,7 +142,16 @@ class PriceCollector(BaseCollector):
         try:
             # _batch_fetch already skips existing (ticker, date) rows and commits once;
             # per-ticker errors are appended without aborting the run (fail-open).
-            records_collected = await self._batch_fetch(tickers, errors)
+            backfill: list[str] = []
+            if backfill_days > 0:
+                thin = self._thin_history_tickers(tickers, min_rows=backfill_min_rows)
+                backfill = [t for t in tickers if t in thin]
+                tickers = [t for t in tickers if t not in thin]
+            if tickers:
+                records_collected += await self._batch_fetch(tickers, errors)
+            if backfill:
+                logger.info(f"{self.name}: backfilling {len(backfill)} tickers over {backfill_days}d")
+                records_collected += await self._batch_fetch(backfill, errors, days=backfill_days)
         except Exception as e:  # noqa: BLE001 - a batch failure must not crash broad collection
             logger.exception(f"{self.name}: Broad batch fetch failed")
             errors.append(f"Broad batch fetch error: {str(e)}")
@@ -164,8 +185,20 @@ class PriceCollector(BaseCollector):
             stmt = stmt.limit(max_tickers)
         return [t for t in self.session.scalars(stmt) if t]
 
+    def _thin_history_tickers(self, tickers: list[str], *, min_rows: int) -> set[str]:
+        """Tickers with fewer than ``min_rows`` stored price rows (none counts as zero)."""
+        if not tickers:
+            return set()
+        stmt = (
+            select(Price.ticker, func.count(Price.id))
+            .where(Price.ticker.in_(tickers))
+            .group_by(Price.ticker)
+        )
+        counts = {t: n for t, n in self.session.execute(stmt)}
+        return {t for t in tickers if counts.get(t, 0) < min_rows}
+
     async def _batch_fetch(
-        self, tickers: list[str], errors: list[str]
+        self, tickers: list[str], errors: list[str], *, days: int | None = None
     ) -> int:
         """
         Fetch prices for multiple tickers in a batch.
@@ -182,7 +215,7 @@ class PriceCollector(BaseCollector):
 
         # Calculate date range
         end_date = date.today()
-        start_date = end_date - timedelta(days=self.days_to_fetch)
+        start_date = end_date - timedelta(days=days or self.days_to_fetch)
 
         logger.debug(
             f"{self.name}: Fetching {len(tickers)} tickers from {start_date} to {end_date}"

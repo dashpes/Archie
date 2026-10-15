@@ -221,3 +221,28 @@ async def test_collect_all_pins_raw_prices_and_keeps_adj_close(tmp_path):
     with get_session() as s:
         pairs = [(r.adj_close, r.close) for r in s.scalars(select(Price).where(Price.ticker == "AAPL"))]
     assert pairs and all(adj is not None and adj < close for adj, close in pairs)
+
+
+@pytest.mark.asyncio
+async def test_collect_all_includes_extra_tickers_and_backfills_thin_history(tmp_path):
+    """Universe names ride along; a name with thin stored history gets the long window."""
+    db = tmp_path / "p.db"
+    init_db(db)
+    with get_session() as s:
+        _seed_insider(s, "AAPL", date.today())
+        # AAPL already has deep history; MSFT (extra) has none -> backfilled.
+        for i in range(400):
+            s.add(Price(ticker="AAPL", date=date.today() - timedelta(days=i + 1), close=100.0))
+    calls = []
+
+    def _download(*, tickers, start, end, **kw):
+        calls.append((tuple(sorted(tickers)) if isinstance(tickers, list) else (tickers,), start))
+        return _ohlcv_frame(list(tickers) if isinstance(tickers, list) else [tickers])
+
+    with patch("investment_monitor.collectors.prices.yf.download", side_effect=_download):
+        collector = _collector(tmp_path, db, days_to_fetch=5)
+        result = await collector.collect_all(extra_tickers=["msft"], backfill_days=730, backfill_min_rows=400)
+    assert result.success
+    windows = {t: start for ts, start in calls for t in ts}
+    assert (date.today() - date.fromisoformat(windows["AAPL"])).days == 5
+    assert (date.today() - date.fromisoformat(windows["MSFT"])).days == 730

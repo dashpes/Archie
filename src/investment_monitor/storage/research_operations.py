@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .research_models import (
-    CandidateScore,
     CongressionalTrade,
     SimulationResult,
     StockCandidate,
@@ -31,64 +30,26 @@ def get_candidate_by_ticker(session: Session, ticker: str) -> StockCandidate | N
     return session.scalar(stmt)
 
 
-def get_candidates_by_status(
-    session: Session, status: str, limit: int = 100
-) -> list[StockCandidate]:
-    """Get candidates with given status."""
-    stmt = (
-        select(StockCandidate)
-        .where(StockCandidate.status == status)
-        .order_by(StockCandidate.created_at.desc())
-        .limit(limit)
-    )
-    return list(session.scalars(stmt))
-
-
-def get_top_candidates(
-    session: Session, limit: int = 20, min_score: float | None = None
-) -> list[StockCandidate]:
-    """Get top scoring candidates."""
-    stmt = select(StockCandidate).where(StockCandidate.composite_score.isnot(None))
-    if min_score is not None:
-        stmt = stmt.where(StockCandidate.composite_score >= min_score)
-    stmt = stmt.order_by(StockCandidate.composite_score.desc()).limit(limit)
-    return list(session.scalars(stmt))
-
-
 # Score operations
-def save_score(session: Session, score: CandidateScore) -> int:
-    """Save a candidate score, returning its ID."""
-    session.add(score)
+def get_universe_tickers(session: Session) -> list[str]:
+    """Current index members, A-Z (a stable order for every scoring and refresh loop)."""
+    stmt = select(StockCandidate.ticker).where(StockCandidate.in_universe.is_(True))
+    return sorted(t for t in session.scalars(stmt))
+
+
+def mark_universe(session: Session, members: set[str]) -> int:
+    """Flag ``members`` as current and everything else as dropped. Returns rows changed."""
+    members = {m.upper() for m in members}
+    changed = 0
+    for row in session.scalars(select(StockCandidate)):
+        wanted = row.ticker.upper() in members
+        if row.in_universe != wanted:
+            row.in_universe = wanted
+            changed += 1
     session.flush()
-    return score.id
+    return changed
 
 
-def get_latest_score(session: Session, ticker: str) -> CandidateScore | None:
-    """Get latest score for ticker."""
-    stmt = (
-        select(CandidateScore)
-        .where(CandidateScore.ticker == ticker)
-        .order_by(CandidateScore.created_at.desc(), CandidateScore.id.desc())
-        .limit(1)
-    )
-    return session.scalar(stmt)
-
-
-def get_score_history(
-    session: Session, ticker: str, limit: int = 10
-) -> list[CandidateScore]:
-    """Get score history for a ticker."""
-    stmt = (
-        select(CandidateScore)
-        .where(CandidateScore.ticker == ticker)
-        .order_by(CandidateScore.created_at.desc(), CandidateScore.id.desc())
-        .limit(limit)
-    )
-    return list(session.scalars(stmt))
-
-
-# Report operations
-# Performance operations
 # Congressional trade operations
 def save_congressional_trade(session: Session, trade: CongressionalTrade) -> int:
     """Save a congressional trade, returning its ID."""
@@ -223,22 +184,3 @@ def get_simulation_results(
     return list(session.scalars(stmt))
 
 
-def get_high_scoring_candidates(
-    session: Session,
-    min_score: float = 80.0,
-) -> list[StockCandidate]:
-    """Get candidates with composite score >= min_score.
-
-    Args:
-        session: Database session.
-        min_score: Minimum composite score threshold.
-
-    Returns:
-        List of StockCandidate meeting the threshold, ordered by score descending.
-    """
-    stmt = (
-        select(StockCandidate)
-        .where(StockCandidate.composite_score >= min_score)
-        .order_by(StockCandidate.composite_score.desc())
-    )
-    return list(session.scalars(stmt))

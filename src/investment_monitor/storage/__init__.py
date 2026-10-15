@@ -22,25 +22,29 @@ from .operations import (
     save_prices,
 )
 from .research_models import (
-    CANDIDATE_STATUSES,
-    CandidateScore,
     CongressionalTrade,
     SimulationResult,
     StockCandidate,
 )
 from .research_operations import (
     get_candidate_by_ticker,
-    get_candidates_by_status,
-    get_high_scoring_candidates,
-    get_latest_score,
-    get_score_history,
     get_simulation_results,
-    get_top_candidates,
     get_trades_for_ticker,
+    get_universe_tickers,
+    mark_universe,
     save_candidate,
     save_congressional_trade,
-    save_score,
     save_simulation_result,
+)
+from .scoring_models import (
+    FundamentalsSnapshot,
+    TickerScore,
+    latest_score,
+    latest_snapshot,
+    save_snapshot,
+    stale_snapshot_tickers,
+    top_scores,
+    upsert_score,
 )
 from .robo_models import RoboOrder, RoboRun
 from .robo_operations import (
@@ -93,27 +97,30 @@ __all__ = [
     "get_unclassified_news",
     "get_recent_news",
     # Research models
-    "CANDIDATE_STATUSES",
     "StockCandidate",
-    "CandidateScore",
     "CongressionalTrade",
     "SimulationResult",
     # Research operations - Candidate
     "save_candidate",
     "get_candidate_by_ticker",
-    "get_candidates_by_status",
-    "get_top_candidates",
     # Research operations - Score
-    "save_score",
-    "get_latest_score",
-    "get_score_history",
     # Research operations - Congressional Trade
     "save_congressional_trade",
     "get_trades_for_ticker",
     # Research operations - Simulation
     "save_simulation_result",
     "get_simulation_results",
-    "get_high_scoring_candidates",
+    "get_universe_tickers",
+    "mark_universe",
+    # Fundamentals snapshots + ticker scores
+    "FundamentalsSnapshot",
+    "TickerScore",
+    "save_snapshot",
+    "latest_snapshot",
+    "stale_snapshot_tickers",
+    "upsert_score",
+    "latest_score",
+    "top_scores",
     # Robo advisor models
     "RoboRun",
     "RoboOrder",

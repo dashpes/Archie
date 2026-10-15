@@ -12,7 +12,6 @@ from investment_monitor.simulation.models import (
     SensitivityResult,
     SimulationOutput,
 )
-from investment_monitor.storage import StockCandidate
 from investment_monitor.storage.research_models import SimulationResult
 
 
@@ -206,13 +205,14 @@ class TestSimulateCommand:
         # Should indicate that a ticker or --auto is required
         assert "ticker" in result.output.lower() or "auto" in result.output.lower()
 
+    @patch("investment_monitor.research_cli.latest_score", return_value=None)
     @patch("investment_monitor.research_cli.init_db")
     @patch("investment_monitor.research_cli.get_session")
     @patch("investment_monitor.research_cli.get_settings")
     @patch("investment_monitor.research_cli.MonteCarloAnalyzer")
     @patch("investment_monitor.research_cli.yf")
     @patch("investment_monitor.research_cli.save_simulation_result")
-    @patch("investment_monitor.research_cli.get_high_scoring_candidates")
+    @patch("investment_monitor.research_cli.top_scores")
     def test_simulate_auto_mode(
         self,
         mock_get_candidates,
@@ -222,6 +222,7 @@ class TestSimulateCommand:
         mock_settings,
         mock_session,
         mock_init_db,
+        mock_latest,
     ):
         """Test simulate command with --auto flag."""
         # Setup mocks
@@ -230,13 +231,11 @@ class TestSimulateCommand:
         mock_session.return_value.__exit__ = MagicMock(return_value=False)
 
         # Mock high-scoring candidates
-        candidate1 = MagicMock(spec=StockCandidate)
+        candidate1 = MagicMock()
         candidate1.ticker = "AAPL"
-        candidate1.composite_score = 85.0
 
-        candidate2 = MagicMock(spec=StockCandidate)
+        candidate2 = MagicMock()
         candidate2.ticker = "MSFT"
-        candidate2.composite_score = 82.0
 
         mock_get_candidates.return_value = [candidate1, candidate2]
 

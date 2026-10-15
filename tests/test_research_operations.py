@@ -8,21 +8,14 @@ from sqlalchemy.orm import Session
 
 from investment_monitor.storage.models import Base
 from investment_monitor.storage.research_models import (
-    CANDIDATE_STATUSES,
-    CandidateScore,
     CongressionalTrade,
     StockCandidate,
 )
 from investment_monitor.storage.research_operations import (
     get_candidate_by_ticker,
-    get_candidates_by_status,
-    get_latest_score,
-    get_score_history,
-    get_top_candidates,
     get_trades_for_ticker,
     save_candidate,
     save_congressional_trade,
-    save_score,
 )
 
 
@@ -43,8 +36,7 @@ class TestCandidateOperations:
         candidate = StockCandidate(
             ticker="AAPL",
             discovery_source="congressional_trades",
-            status="discovered",
-            composite_score=85.0,
+            in_universe=True,
         )
         candidate_id = save_candidate(db_session, candidate)
         assert candidate_id is not None
@@ -52,169 +44,18 @@ class TestCandidateOperations:
 
     def test_get_candidate_by_ticker(self, db_session):
         """Test getting candidate by ticker."""
-        candidate = StockCandidate(ticker="MSFT", status="screening")
+        candidate = StockCandidate(ticker="MSFT", in_universe=True)
         save_candidate(db_session, candidate)
         db_session.commit()
 
         retrieved = get_candidate_by_ticker(db_session, "MSFT")
         assert retrieved is not None
         assert retrieved.ticker == "MSFT"
-        assert retrieved.status == "screening"
 
     def test_get_candidate_by_ticker_not_found(self, db_session):
         """Test getting non-existent candidate returns None."""
         result = get_candidate_by_ticker(db_session, "NONEXISTENT")
         assert result is None
-
-    def test_get_candidates_by_status(self, db_session):
-        """Test getting candidates by status."""
-        # Create candidates with different statuses
-        for i, status in enumerate(CANDIDATE_STATUSES[:3]):
-            for j in range(2):
-                candidate = StockCandidate(
-                    ticker=f"TEST{i}_{j}",
-                    status=status,
-                )
-                save_candidate(db_session, candidate)
-        db_session.commit()
-
-        # Get candidates by status
-        discovered = get_candidates_by_status(db_session, "discovered")
-        assert len(discovered) == 2
-
-        screening = get_candidates_by_status(db_session, "screening")
-        assert len(screening) == 2
-
-    def test_get_candidates_by_status_with_limit(self, db_session):
-        """Test limiting candidates by status."""
-        for i in range(5):
-            candidate = StockCandidate(ticker=f"LIM{i}", status="watchlist")
-            save_candidate(db_session, candidate)
-        db_session.commit()
-
-        limited = get_candidates_by_status(db_session, "watchlist", limit=3)
-        assert len(limited) == 3
-
-    def test_get_candidates_by_status_empty(self, db_session):
-        """Test getting candidates with status that has no matches."""
-        result = get_candidates_by_status(db_session, "rejected")
-        assert result == []
-
-    def test_get_top_candidates(self, db_session):
-        """Test getting top scoring candidates."""
-        scores = [90.0, 85.0, 80.0, 75.0, 70.0]
-        for i, score in enumerate(scores):
-            candidate = StockCandidate(
-                ticker=f"TOP{i}",
-                status="researched",
-                composite_score=score,
-            )
-            save_candidate(db_session, candidate)
-        db_session.commit()
-
-        top = get_top_candidates(db_session, limit=3)
-        assert len(top) == 3
-        assert top[0].composite_score == 90.0
-        assert top[1].composite_score == 85.0
-        assert top[2].composite_score == 80.0
-
-    def test_get_top_candidates_with_min_score(self, db_session):
-        """Test getting candidates above minimum score."""
-        scores = [90.0, 75.0, 60.0, 45.0]
-        for i, score in enumerate(scores):
-            candidate = StockCandidate(
-                ticker=f"MIN{i}",
-                status="researched",
-                composite_score=score,
-            )
-            save_candidate(db_session, candidate)
-        db_session.commit()
-
-        top = get_top_candidates(db_session, min_score=70.0)
-        assert len(top) == 2
-        assert all(c.composite_score >= 70.0 for c in top)
-
-    def test_get_top_candidates_excludes_null_scores(self, db_session):
-        """Test that candidates without scores are excluded."""
-        candidate_with_score = StockCandidate(
-            ticker="SCORED", composite_score=80.0
-        )
-        candidate_without_score = StockCandidate(
-            ticker="UNSCORED", composite_score=None
-        )
-        save_candidate(db_session, candidate_with_score)
-        save_candidate(db_session, candidate_without_score)
-        db_session.commit()
-
-        top = get_top_candidates(db_session)
-        assert len(top) == 1
-        assert top[0].ticker == "SCORED"
-
-
-class TestScoreOperations:
-    """Tests for CandidateScore CRUD operations."""
-
-    def test_save_score(self, db_session):
-        """Test saving a candidate score."""
-        score = CandidateScore(
-            ticker="AAPL",
-            value_score=80.0,
-            growth_score=75.0,
-            quality_score=85.0,
-            momentum_score=70.0,
-            sentiment_score=90.0,
-            composite_score=80.0,
-        )
-        score_id = save_score(db_session, score)
-        assert score_id is not None
-        assert score.id == score_id
-
-    def test_get_latest_score(self, db_session):
-        """Test getting latest score for a ticker."""
-        score = CandidateScore(ticker="MSFT", composite_score=75.0)
-        save_score(db_session, score)
-        db_session.commit()
-
-        retrieved = get_latest_score(db_session, "MSFT")
-        assert retrieved is not None
-        assert retrieved.ticker == "MSFT"
-        assert retrieved.composite_score == 75.0
-
-    def test_get_latest_score_not_found(self, db_session):
-        """Test getting score for ticker with no scores."""
-        result = get_latest_score(db_session, "NONEXISTENT")
-        assert result is None
-
-    def test_get_score_history(self, db_session):
-        """Test getting score history for a ticker.
-
-        Note: CandidateScore has a unique constraint on ticker, so in practice
-        only one score per ticker is stored. This test verifies the operation
-        works correctly with the constraint in place.
-        """
-        score = CandidateScore(
-            ticker="HIST",
-            composite_score=80.0,
-            reasoning="Initial score",
-        )
-        save_score(db_session, score)
-        db_session.commit()
-
-        history = get_score_history(db_session, "HIST")
-        assert len(history) == 1
-        assert history[0].composite_score == 80.0
-
-    def test_get_score_history_limit(self, db_session):
-        """Test limiting score history."""
-        # Create score
-        score = CandidateScore(ticker="LIMSCORE", composite_score=85.0)
-        save_score(db_session, score)
-        db_session.commit()
-
-        # Limit should work (returns 1 since unique constraint)
-        history = get_score_history(db_session, "LIMSCORE", limit=5)
-        assert len(history) == 1
-
 
 class TestCongressionalTradeOperations:
     """Tests for CongressionalTrade CRUD operations."""
@@ -338,51 +179,16 @@ class TestCongressionalTradeOperations:
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
-    def test_empty_database_operations(self, db_session):
-        """Test operations on empty database."""
-        assert get_candidate_by_ticker(db_session, "NONE") is None
-        assert get_latest_score(db_session, "NONE") is None
-        assert get_candidates_by_status(db_session, "discovered") == []
-        assert get_top_candidates(db_session) == []
-        assert get_score_history(db_session, "NONE") == []
-        assert get_trades_for_ticker(db_session, "NONE") == []
-
-    def test_zero_limit(self, db_session):
-        """Test operations with zero limit."""
-        candidate = StockCandidate(ticker="ZERO", status="discovered")
-        save_candidate(db_session, candidate)
-        db_session.commit()
-
-        # Zero limit should return empty list
-        result = get_candidates_by_status(db_session, "discovered", limit=0)
-        assert result == []
-
     def test_special_characters_in_ticker(self, db_session):
         """Test handling tickers with special formats."""
         # Some tickers have dots (e.g., BRK.A, BRK.B)
-        candidate = StockCandidate(ticker="BRK.A", status="discovered")
+        candidate = StockCandidate(ticker="BRK.A", in_universe=True)
         save_candidate(db_session, candidate)
         db_session.commit()
 
         retrieved = get_candidate_by_ticker(db_session, "BRK.A")
         assert retrieved is not None
         assert retrieved.ticker == "BRK.A"
-
-    def test_null_optional_fields(self, db_session):
-        """Test that optional fields can be null."""
-        # Candidate with minimal required fields
-        candidate = StockCandidate(ticker="MINIMAL")
-        save_candidate(db_session, candidate)
-
-        # Score with minimal required fields
-        score = CandidateScore(ticker="MINIMAL")
-        save_score(db_session, score)
-
-        db_session.commit()
-
-        # All should be saved successfully
-        assert get_candidate_by_ticker(db_session, "MINIMAL") is not None
-        assert get_latest_score(db_session, "MINIMAL") is not None
 
     def test_flush_behavior(self, db_session):
         """Test that flush makes IDs available without commit."""
