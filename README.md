@@ -1,4 +1,4 @@
-# Investment Monitor
+# Archie
 
 A personal investment monitoring system that tracks your portfolio, collects market data, generates alerts based on configurable rules, and delivers daily/weekly digests.
 
@@ -20,8 +20,8 @@ A personal investment monitoring system that tracks your portfolio, collects mar
 
 ```bash
 # Clone
-git clone https://github.com/your-repo/investment-monitor.git
-cd investment-monitor
+git clone https://github.com/dashpes/Archie.git
+cd Archie
 
 # Create virtual environment
 python3 -m venv .venv
@@ -290,7 +290,7 @@ The system gracefully degrades if Ollama isn't available.
 ## Project Structure
 
 ```
-investment-monitor/
+Archie/
 ├── src/investment_monitor/
 │   ├── config.py           # Configuration loading
 │   ├── main.py              # Main orchestrator
@@ -464,4 +464,4 @@ then `systemctl enable --now investment-robo.timer`. Default cadence is weekly M
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
